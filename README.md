@@ -22,12 +22,17 @@ This repo currently implements the **Milestone 2 fake-first scaffold** (web dash
   - `GET /api/search`, `GET /api/rag/memory` (BM25 over FTS).
   - `GET/POST /api/providers` (registry health + per-provider config upsert).
   - `GET /api/events` (SSE — streams the current event bus snapshot; clients reconnect via `EventSource`).
-- Tests for database CRUD, RAG memory, fake providers, fake pipeline, XP profile seed, and the full FastAPI surface (21 passing).
+- Tests for database CRUD, RAG memory, fake providers, fake pipeline, XP profile seed, and the full FastAPI surface (41 passing).
+- Real LLM provider adapters behind `VIBEDUMP_REGISTRY=real`:
+  OpenAI, OpenRouter, NVIDIA NIM, Groq, MiniMax (OpenAI-compatible chat
+  completions), Gemini (generative language API), and `local_pc` for the
+  desktop's Ollama. Stdlib `urllib` only - no extra HTTP dep on the Pi.
 
 ### Not yet
 
 - Real Whisplay daemon socket, PiSugar battery polling, real audio record/playback.
-- Real cloud/local STT/LLM/TTS adapters (only the `fake` registry is wired).
+- Real STT / TTS adapters (only the `fake` STT and TTS are wired; real LLMs
+  are usable today).
 - PIL mascot frames and XP / achievements UI.
 - Google Drive / rclone sync, exports, redacted config.
 - Systemd unit beyond the placeholder.
@@ -85,7 +90,13 @@ Event types emitted today: `dump.created`, `dump.deleted`, `blueprint.generated`
 
 - `.env` (gitignored) — provider API keys, base URLs.
 - `config.example.json` — typed config defaults; copy to `config.json` for a persistent DB path.
-- The 512MB Pi Zero 2 W is the target, so the runtime deps stay minimal: `fastapi`, `uvicorn`, and the standard library.
+- `VIBEDUMP_REGISTRY=fake` (default) wires the zero-config fake provider set.
+  `VIBEDUMP_REGISTRY=real` wires `build_registry()`: any cloud LLM with a key
+  set is registered (OpenAI, OpenRouter, NVIDIA, Groq, MiniMax, Gemini) plus
+  the LAN `local_pc` Ollama adapter. Missing keys -> provider omitted (no
+  crash); the dashboard surfaces the reason in the provider health list.
+- The 512MB Pi Zero 2 W is the target, so the runtime deps stay minimal:
+  `fastapi`, `uvicorn`, and the standard library (no `httpx`/`requests`).
 
 ## Project layout
 
@@ -128,8 +139,8 @@ vibe-dump/
 
 ## Next milestones
 
-1. Provider registry health endpoints, configurable local/cloud adapters (OpenRouter, Gemini, NVIDIA, MiniMax, OpenAI, Groq).
-2. Full agent pipeline state machine (active listener LLM, finalize command, blueprint compiler with real model).
+1. Full agent pipeline state machine (active listener LLM, finalize command, blueprint compiler with real model).
+2. Real STT / TTS adapters (Whisper / Groq Whisper, Piper / ElevenLabs).
 3. PIL mascot frames + XP/achievements UI.
 4. Storage sync (rclone) with redacted config only.
 5. Whisplay daemon socket, button events, LED, LCD framebuffer; PiSugar battery poller; audio record/playback.

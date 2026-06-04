@@ -1,5 +1,12 @@
-"""Provider adapter placeholder.
+"""MiniMax adapter (OpenAI-compatible, served via api.minimax.io)."""
 
-Real network/API-key behavior belongs in Milestone 3+. This module exists so
-configuration and UI work can reference the provider without importing secrets.
-"""
+from __future__ import annotations
+
+from .openai_provider import OpenAICompatLLM
+
+
+class MiniMaxLLM(OpenAICompatLLM):
+    name = "minimax"
+    env_key = "MINIMAX_API_KEY"
+    default_base_url = "https://api.minimax.io/v1"
+    default_model = "MiniMax-Text-01"

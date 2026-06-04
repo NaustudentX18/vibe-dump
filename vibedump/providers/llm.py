@@ -4,6 +4,7 @@ from vibedump.schemas import blueprint_template
 
 class FakeLLM:
     name = "fake"
+    configured = True
 
     def complete(self, prompt: str) -> str:
         if "blueprint" in prompt.lower():

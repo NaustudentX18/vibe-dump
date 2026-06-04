@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .database import Database
-from .providers import fake_registry
+from .providers import ProviderRegistry, fake_registry
 from .ragmemory import RagMemory
 from .schemas import blueprint_template
 
@@ -18,9 +18,9 @@ class PipelineResult:
 
 
 class FakeAgentPipeline:
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, registry: ProviderRegistry | None = None) -> None:
         self.db = db
-        self.registry = fake_registry()
+        self.registry = registry or fake_registry()
         self.memory = RagMemory(db)
 
     def ingest_fake_dump(self, title: str, audio_path: str) -> PipelineResult:

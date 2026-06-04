@@ -10,6 +10,7 @@ not installed so the package still imports cleanly for the database / RAG tests.
 """
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Iterator
@@ -23,6 +24,7 @@ from .database import (
     TurnRecord,
 )
 from .events import EventBus
+from .providers import build_registry, fake_registry
 from .ragmemory import RagMemory
 from .state import DeviceState
 
@@ -50,10 +52,14 @@ def _create_default_state() -> AppState:
     db = Database(":memory:")
     db.initialize()
     bus = EventBus()
+    # VIBEDUMP_REGISTRY=fake (default) keeps tests + zero-config dev hermetic.
+    # VIBEDUMP_REGISTRY=real wires the production provider set (build_registry).
+    registry_kind = os.environ.get("VIBEDUMP_REGISTRY", "fake").lower()
+    registry = build_registry() if registry_kind == "real" else fake_registry()
     return AppState(
         db=db,
         bus=bus,
-        pipeline=FakeAgentPipeline(db),
+        pipeline=FakeAgentPipeline(db, registry=registry),
         memory=RagMemory(db),
     )
 
