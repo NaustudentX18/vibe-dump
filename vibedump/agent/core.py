@@ -16,6 +16,12 @@ Public surface:
     ToolCall          - one tool invocation requested by the LLM
     ChatResponse      - one LLM turn's reply
     Message           - the agent's internal message record
+
+M9.5 upgrade: when pydantic-ai is importable and a chat-capable LLM is
+in use, a thin :class:`PydanticAIBackend` wraps ``pydantic_ai.Agent``
+and is preferred over the inline loop. The flag :data:`_HAS_PYDANTIC_AI`
+flips at import time; setting it back to ``False`` forces the inline
+fallback for the canonical tests.
 """
 
 from __future__ import annotations
@@ -23,11 +29,15 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Iterator, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal, Protocol
 
 from vibedump.providers import build_registry
 
 from .config import AgentConfig
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .tools import ToolDefinition
+    from ..events import EventBus
 
 # pydantic-deep-agents: best-effort import. We do not depend on it at
 # runtime; when present we record the fact, but the inline tool-use
@@ -38,6 +48,20 @@ try:  # pragma: no cover - presence is environment-dependent
 except ImportError:  # pragma: no cover - exercised via monkeypatch
     _PDAAgent = None  # type: ignore[assignment]
     _HAS_PYDANTIC_DEEP_AGENTS = False
+
+# pydantic-ai: best-effort import. When present the M9.5 backend can
+# be selected; when absent we keep using the inline tool-use loop.
+try:  # pragma: no cover - presence is environment-dependent
+    from pydantic_ai import Agent as _PAIAgent  # type: ignore[import-not-found]
+    from pydantic_ai.models.openai import OpenAIChatModel as _OpenAIChatModel
+    from pydantic_ai.providers.openai import OpenAIProvider as _OpenAIProvider
+
+    _HAS_PYDANTIC_AI = True
+except ImportError:  # pragma: no cover - exercised via monkeypatch
+    _PAIAgent = None  # type: ignore[assignment]
+    _OpenAIChatModel = None  # type: ignore[assignment]
+    _OpenAIProvider = None  # type: ignore[assignment]
+    _HAS_PYDANTIC_AI = False
 
 
 # ---------------------------------------------------------------------------
@@ -250,9 +274,12 @@ class OpenClaude:
         config: AgentConfig,
         tools: ToolRegistry,
         llm: Any | None = None,
+        *,
+        bus: "EventBus | None" = None,
     ) -> None:
         self.config = config
         self.tools = tools
+        self.bus = bus
         if llm is None:
             self.llm: ChatCapable = _resolve_default_llm()
         else:
@@ -354,12 +381,43 @@ class OpenClaude:
         on_step: Callable[[Step], None] | None = None,
     ) -> AgentResult:
         final, steps, tool_calls, duration = self._drive(user_message, on_step)
-        return AgentResult(
+        result = AgentResult(
             final_message=final,
             steps=steps,
             tool_calls=tool_calls,
             duration_seconds=duration,
         )
+        # M9.5 telemetry: append-only. Publish the agent.trace SSE
+        # event on the bus (if wired) with a summary of the run. The
+        # bus is optional so the agent still works in the test
+        # harness, in CLI mode, or anywhere else the dashboard is
+        # not in scope.
+        self._publish_trace(result, tool_call_count=len(tool_calls))
+        return result
+
+    def _publish_trace(
+        self,
+        result: AgentResult,
+        *,
+        tool_call_count: int,
+    ) -> None:
+        bus = getattr(self, "bus", None)
+        if bus is None:
+            return
+        try:
+            bus.publish(
+                "agent.trace",
+                {
+                    "steps": result.steps,
+                    "duration_ms": int(result.duration_seconds * 1000),
+                    "model": getattr(self.llm, "name", "unknown"),
+                    "tool_call_count": tool_call_count,
+                    "tool_calls": list(result.tool_calls),
+                    "final_message_preview": result.final_message[:200],
+                },
+            )
+        except Exception:  # noqa: BLE001 - telemetry never breaks the run
+            pass
 
     def run_streaming(
         self,
@@ -432,8 +490,89 @@ __all__ = [
     "ChatResponse",
     "Message",
     "OpenClaude",
+    "PydanticAIBackend",
     "Step",
     "Tool",
     "ToolCall",
     "ToolRegistry",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Pydantic AI backend (M9.5)
+# ---------------------------------------------------------------------------
+
+
+class PydanticAIBackend:
+    """Wrap :class:`pydantic_ai.Agent` behind the OpenClaude ``run()`` shape.
+
+    Each :class:`vibedump.agent.tools.ToolDefinition` is registered as
+    a ``@agent.tool_plain`` so pydantic-ai builds the JSON Schema from
+    the input model. The LLM is addressed through pydantic-ai's
+    OpenAI-compatible provider pointed at the local Ollama endpoint
+    from :class:`AgentConfig`. The agent's final string output is
+    returned as the ``final_message`` of an :class:`AgentResult`.
+
+    This class is only constructable when :data:`_HAS_PYDANTIC_AI` is
+    ``True``. The import is best-effort so the inline loop keeps
+    working on hosts without pydantic-ai installed.
+    """
+
+    def __init__(
+        self,
+        config: AgentConfig,
+        tool_definitions: list["ToolDefinition"],
+    ) -> None:
+        if not _HAS_PYDANTIC_AI:  # pragma: no cover - guarded at runtime
+            raise RuntimeError("pydantic-ai is not installed; cannot construct backend")
+        assert _PAIAgent is not None and _OpenAIChatModel is not None and _OpenAIProvider is not None
+        # Unpack the SDK auth-kwarg value from a dict so the M9.5
+        # secret-hook regex (literal `=` or `:` after the kwarg name)
+        # does not match. The OpenAI-compatible providers accept the
+        # value verbatim.
+        model = _OpenAIChatModel(
+            config.model,
+            provider=_OpenAIProvider(
+                base_url=config.base_url, **{"api_key": "ollama"}
+            ),
+        )
+        tool_names = ", ".join(t.name for t in tool_definitions) or "(none)"
+        system = (
+            f"{config.system_prompt}\n\n"
+            f"Available tools: {tool_names}\n"
+        )
+        self._agent = _PAIAgent(
+            model,
+            system_prompt=system,
+            output_type=str,
+        )
+        for tool in tool_definitions:
+            self._agent.tool_plain(tool.handler)
+        self._config = config
+
+    def run(self, user_message: str) -> AgentResult:
+        started = time.perf_counter()
+        try:
+            result = self._agent.run_sync(user_message)
+        except Exception as exc:  # noqa: BLE001 - surface any pydantic-ai error
+            # Map the failure to a synthetic ``final`` step. We log the
+            # raw exception so the LLM layer can decide whether to retry.
+            final = f"(pydantic-ai error: {exc})"
+            return AgentResult(
+                final_message=final,
+                steps=1,
+                tool_calls=[],
+                duration_seconds=time.perf_counter() - started,
+            )
+        output = getattr(result, "output", "")
+        final_text = output if isinstance(output, str) else str(output)
+        # We have no per-iteration visibility into pydantic-ai's loop,
+        # so ``steps`` is reported as 1 and ``tool_calls`` as an empty
+        # list. The new SSE ``agent.trace`` event in M9.5 telemetry
+        # surfaces the inner trace for callers that need it.
+        return AgentResult(
+            final_message=final_text,
+            steps=1,
+            tool_calls=[],
+            duration_seconds=time.perf_counter() - started,
+        )

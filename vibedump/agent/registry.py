@@ -6,17 +6,21 @@ LLM layer. It exposes:
 * :meth:`register` to add a tool (raises on duplicate names)
 * :meth:`schemas` to render the LLM function-calling payload
 * :meth:`dispatch` to invoke a tool by name with structured error
-  wrapping
+  wrapping and Pydantic validation
 * :meth:`names` and ``__contains__`` for membership / iteration
 
-``dispatch`` wraps any non-:class:`ToolError` exception in a fresh
-``ToolError`` so the LLM gets a uniform failure shape. ``ToolError``
-itself is re-raised so callers can introspect ``name`` / ``message``.
+``dispatch`` validates the raw ``args`` dict against the tool's
+``input_model`` before forwarding, so every handler invocation is
+guaranteed to receive a populated Pydantic model instance.
+Non-:class:`ToolError` exceptions are wrapped in a fresh ``ToolError``
+so the LLM gets a uniform failure shape.
 """
 
 from __future__ import annotations
 
 from typing import Any, Iterable, Mapping
+
+from pydantic import ValidationError
 
 from .tools import ToolDefinition, ToolError, build_tools
 
@@ -28,10 +32,9 @@ __all__ = ["ToolRegistry", "ToolDefinition", "ToolError", "build_tools"]
 class ToolRegistry:
     """In-memory tool registry keyed by tool name.
 
-    The registry is intentionally tiny: a dict from name to
-    :class:`ToolDefinition`, plus a small dispatch wrapper. It does
-    NOT do JSON-schema validation; that responsibility lives in the
-    LLM layer (or in the tool handlers themselves).
+    The registry validates arguments against the tool's Pydantic
+    ``input_model`` on every dispatch, so the contract with handlers
+    is "you always receive a valid model instance".
     """
 
     def __init__(self, tools: Iterable[ToolDefinition] | None = None) -> None:
@@ -66,15 +69,16 @@ class ToolRegistry:
     def schemas(self) -> list[dict[str, Any]]:
         """Return the LLM function-calling payload.
 
-        Each entry has the shape ``{name, description, input_schema}``.
-        Tools are returned in registration order so the LLM prompt
-        stays stable across calls.
+        Each entry has the shape ``{name, description, input_schema}``
+        where ``input_schema`` is generated from the Pydantic input
+        model via ``model_json_schema()``. Tools are returned in
+        registration order so the LLM prompt stays stable.
         """
         return [
             {
                 "name": tool.name,
                 "description": tool.description,
-                "input_schema": dict(tool.input_schema),
+                "input_schema": tool.input_schema(),
             }
             for tool in self._tools.values()
         ]
@@ -90,23 +94,30 @@ class ToolRegistry:
     def dispatch(self, name: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
         """Invoke the tool registered under ``name``.
 
-        ``args`` is forwarded to the handler as a dict; an empty dict
-        is substituted when ``None`` is passed so tools with no
-        parameters can be called with ``dispatch("name")`` or
-        ``dispatch("name", None)`` interchangeably.
+        ``args`` is validated against the tool's Pydantic ``input_model``
+        before being forwarded; an empty dict is substituted when
+        ``None`` is passed so tools with no parameters can be called
+        with ``dispatch("name")`` or ``dispatch("name", None)``
+        interchangeably.
 
         Exceptions raised by the handler:
         * :class:`ToolError` is re-raised unchanged.
-        * Any other exception is wrapped in a :class:`ToolError` whose
+        * ``pydantic.ValidationError`` is wrapped in a :class:`ToolError`
+          so the LLM layer never sees Pydantic internals.
+        * Any other exception is wrapped in a :class:`ToolError`` whose
           ``name`` is the tool name and whose ``message`` is the
           stringified cause.
         """
         tool = self._tools.get(name)
         if tool is None:
             raise ToolError(name, f"unknown tool: {name!r}")
-        call_args: dict[str, Any] = dict(args) if args is not None else {}
+        raw_args: dict[str, Any] = dict(args) if args is not None else {}
         try:
-            return tool.handler(call_args)
+            validated = tool.input_model.model_validate(raw_args)
+        except ValidationError as exc:
+            raise ToolError(name, f"invalid arguments: {exc}") from exc
+        try:
+            return tool.handler(validated)
         except ToolError:
             raise
         except Exception as exc:  # noqa: BLE001 - intentional broad catch

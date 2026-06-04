@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from vibedump.agent import AgentConfig, OpenClaude
 from vibedump.agent.core import (
@@ -15,6 +17,17 @@ from vibedump.agent.core import (
     ToolCall,
     ToolRegistry,
 )
+
+
+class _EchoInput(BaseModel):
+    """Module-level Pydantic model so pydantic-ai can resolve the type hint.
+
+    Tests that need an inline model for the inline path can keep using
+    nested classes, but the pydantic-ai backend evaluates ``get_type_hints``
+    at function-registration time and requires a fully-qualified name.
+    """
+
+    value: str
 
 
 class FakeLLMProvider:
@@ -219,4 +232,68 @@ def test_fallback_when_pydantic_deep_agents_missing(monkeypatch):
     agent = OpenClaude(AgentConfig(), ToolRegistry(), llm=fake)
     result = agent.run("ping")
     assert result.final_message == "inline works"
+    assert result.steps == 1
+
+
+# ---------------------------------------------------------------------------
+# M9.5: Pydantic AI backend selection
+# ---------------------------------------------------------------------------
+
+
+def test_pydantic_ai_path_taken_when_available(monkeypatch):
+    """PydanticAIBackend is constructable when _HAS_PYDANTIC_AI is True."""
+    from vibedump.agent.core import PydanticAIBackend
+    from vibedump.agent.tools import ToolDefinition
+
+    import vibedump.agent.core as core
+
+    if not core._HAS_PYDANTIC_AI:
+        pytest.skip("pydantic-ai not installed in this environment")
+
+    captured: list[str] = []
+
+    def handler(args: _EchoInput) -> dict[str, Any]:
+        captured.append(args.value)
+        return {"echoed": args.value}
+
+    tool = ToolDefinition(
+        name="echo",
+        description="echo",
+        input_model=_EchoInput,
+        handler=handler,
+    )
+    backend = PydanticAIBackend(AgentConfig(), [tool])
+    assert backend is not None
+    # Confirm the underlying pydantic_ai.Agent registered the tool.
+    assert hasattr(backend, "_agent")
+
+
+def test_fallback_to_inline_when_pydantic_ai_missing(monkeypatch):
+    """When _HAS_PYDANTIC_AI is False, PydanticAIBackend refuses to construct."""
+    from vibedump.agent.core import PydanticAIBackend
+    from vibedump.agent.tools import EmptyInput, ToolDefinition
+
+    import vibedump.agent.core as core
+
+    monkeypatch.setattr(core, "_HAS_PYDANTIC_AI", False)
+    monkeypatch.setattr(core, "_PAIAgent", None)
+    monkeypatch.setattr(core, "_OpenAIChatModel", None)
+    monkeypatch.setattr(core, "_OpenAIProvider", None)
+
+    tool = ToolDefinition(
+        name="noop",
+        description="noop",
+        input_model=EmptyInput,
+        handler=lambda _: {"ok": True},
+    )
+    with pytest.raises(RuntimeError, match="pydantic-ai is not installed"):
+        PydanticAIBackend(AgentConfig(), [tool])
+
+
+def test_inline_loop_still_works_with_pydantic_ai_installed():
+    """Even with pydantic-ai installed, the inline path stays the default."""
+    fake = FakeLLMProvider([ChatResponse(content="still inline")])
+    agent = OpenClaude(AgentConfig(), ToolRegistry(), llm=fake)
+    result = agent.run("hi")
+    assert result.final_message == "still inline"
     assert result.steps == 1

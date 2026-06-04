@@ -300,6 +300,21 @@ class Database:
             )
             return cur.rowcount > 0
 
+    def update_dump_metadata(self, dump_id: int, metadata: dict[str, Any]) -> bool:
+        """Replace the ``metadata_json`` column for a dump.
+
+        M9.5: the graph pipeline persists its serialised DumpState
+        under a reserved key. Callers pass the full new metadata
+        dict; non-graph fields must be merged in by the caller.
+        """
+        with self.transaction() as conn:
+            cur = conn.execute(
+                "UPDATE dumps SET metadata_json = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = ?",
+                (json.dumps(metadata, sort_keys=True), dump_id),
+            )
+            return cur.rowcount > 0
+
     def list_turns(self, dump_id: int) -> list[TurnRecord]:
         with self._lock:
             rows = self._conn.execute(

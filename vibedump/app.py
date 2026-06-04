@@ -233,9 +233,13 @@ def _wire_agent_runtime(state: AppState) -> None:
         # config and reuse the registry we just constructed above. The
         # LLM is None so the runtime falls back to its built-in default.
         config = _AgentConfig()
+        # M9.5: wire the EventBus so the agent publishes
+        # ``agent.trace`` SSE events for the dashboard's trace panel.
+        # Best-effort: if ``state.bus`` is None the agent still runs.
         state.agent = _OpenClaude(
             config=config,
             tools=state.agent_registry,
+            bus=getattr(state, "bus", None),
         )
     except Exception as exc:
         errors.append(f"core: {exc}")

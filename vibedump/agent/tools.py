@@ -2,8 +2,9 @@
 
 Each tool wraps a slice of the existing Vibe-Dump stack (Database,
 AgentPipeline, rclone bridge, backup export) behind a uniform
-``ToolDefinition`` envelope. The LLM-facing surface is JSON schema;
-the handlers are sync callables that raise ``ToolError`` on failure.
+``ToolDefinition`` envelope. The LLM-facing surface is JSON Schema
+derived from a Pydantic input model; the handlers are sync callables
+that accept the validated model and return a dict.
 
 Naming policy: identifiers MUST NOT contain the substrings
 ``api_key``, ``secret``, ``token``, or ``password`` (project rule).
@@ -18,7 +19,13 @@ import logging
 from dataclasses import asdict as _asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal, TYPE_CHECKING
+from typing import Any, Callable, Generic, Literal, TYPE_CHECKING, TypeVar
+
+from pydantic import BaseModel, Field
+
+# Generic over the concrete Pydantic input model so handlers keep
+# their precise type hints while the registry sees a uniform surface.
+InputT = TypeVar("InputT", bound=BaseModel)
 
 from ..agent_pipeline import AgentPipeline
 from ..database import Database
@@ -49,7 +56,7 @@ class ToolError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class ToolDefinition:
+class ToolDefinition(Generic[InputT]):
     """A single LLM-callable tool.
 
     Attributes
@@ -59,18 +66,104 @@ class ToolDefinition:
     description:
         Human-readable explanation of what the tool does. Shown in the
         function-calling prompt.
-    input_schema:
-        JSON Schema dict describing the accepted argument shape.
+    input_model:
+        Pydantic model class describing the accepted argument shape.
+        JSON Schema is generated from this via ``model_json_schema()``.
     handler:
-        Sync callable ``(args: dict) -> dict``. May raise ``ToolError``
-        to surface a structured failure; any other exception is wrapped
-        by the registry at dispatch time.
+        Sync callable ``(args: InputT) -> dict``. Receives the
+        validated Pydantic model instance. May raise ``ToolError``
+        to surface a structured failure; any other exception is
+        wrapped by the registry at dispatch time.
     """
 
     name: str
     description: str
-    input_schema: dict[str, Any]
-    handler: Callable[[dict[str, Any]], dict[str, Any]] = field(compare=False)
+    input_model: type[InputT]
+    handler: Callable[[InputT], dict[str, Any]] = field(compare=False)
+
+    def input_schema(self) -> dict[str, Any]:
+        """Return the JSON Schema dict for the input model.
+
+        Convenience accessor so callers don't have to remember the
+        Pydantic API surface.
+        """
+        return self.input_model.model_json_schema()
+
+
+# ---------------------------------------------------------------------------
+# Pydantic input models
+# ---------------------------------------------------------------------------
+
+
+class ListDumpsInput(BaseModel):
+    limit: int = Field(
+        default=20,
+        ge=1,
+        le=500,
+        description="Maximum dumps to fetch (1-500).",
+    )
+    status: str | None = Field(
+        default=None,
+        description=(
+            "Optional status filter (e.g. 'ready', 'listening'). "
+            "Applied after fetch."
+        ),
+    )
+
+
+class ReadDumpInput(BaseModel):
+    dump_id: int = Field(ge=1)
+
+
+class AppendTurnInput(BaseModel):
+    dump_id: int = Field(ge=1)
+    # text has no min_length on purpose: the handler raises a structured
+    # ToolError on whitespace-only text, which the LLM layer treats as
+    # a recoverable error rather than a validation failure.
+    text: str
+    role: Literal["user"] = "user"
+
+
+class WriteDumpInput(BaseModel):
+    title: str = Field(min_length=1)
+    initial_text: str | None = Field(
+        default=None,
+        description=(
+            "Optional first user turn. When provided the dump is "
+            "pre-seeded with this text via add_user_turn."
+        ),
+    )
+
+
+class RunPipelineInput(BaseModel):
+    dump_id: int = Field(ge=1)
+    max_steps: int = Field(default=4, ge=1, le=32)
+
+
+class SearchMemoryInput(BaseModel):
+    query: str = Field(min_length=1)
+    limit: int = Field(default=5, ge=1, le=50)
+
+
+SyncDirection = Literal["push", "pull", "both"]
+
+
+class SyncStorageInput(BaseModel):
+    direction: SyncDirection = "push"
+
+
+class ExportBundleInput(BaseModel):
+    dest_name: str | None = Field(
+        default=None,
+        description=(
+            "Optional zip stem (without .zip). When omitted, "
+            "a UTC timestamp is used."
+        ),
+    )
+
+
+class EmptyInput(BaseModel):
+    """Marker model for tools that take no arguments."""
 
 
 # ---------------------------------------------------------------------------
@@ -145,12 +238,8 @@ def build_tools(
 
 
 def _make_list_dumps(db: Database) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
-        limit = int(args.get("limit", 20))
-        if limit <= 0 or limit > 500:
-            return {"error": "limit must be between 1 and 500"}
-        status_filter = args.get("status")
-        rows = db.list_dumps(limit=limit)
+    def handler(args: ListDumpsInput) -> dict[str, Any]:
+        rows = db.list_dumps(limit=args.limit)
         slim = [
             {
                 "id": r.id,
@@ -160,8 +249,8 @@ def _make_list_dumps(db: Database) -> ToolDefinition:
             }
             for r in rows
         ]
-        if status_filter is not None:
-            slim = [d for d in slim if d["status"] == status_filter]
+        if args.status is not None:
+            slim = [d for d in slim if d["status"] == args.status]
         return {"items": slim, "count": len(slim)}
 
     return ToolDefinition(
@@ -172,26 +261,7 @@ def _make_list_dumps(db: Database) -> ToolDefinition:
             "method does not support a status filter natively, so any "
             "status filter is applied client-side after fetch."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 500,
-                    "default": 20,
-                    "description": "Maximum dumps to fetch (1-500).",
-                },
-                "status": {
-                    "type": "string",
-                    "description": (
-                        "Optional status filter (e.g. 'ready', 'listening'). "
-                        "Applied after fetch."
-                    ),
-                },
-            },
-            "additionalProperties": False,
-        },
+        input_model=ListDumpsInput,
         handler=handler,
     )
 
@@ -202,19 +272,18 @@ def _make_list_dumps(db: Database) -> ToolDefinition:
 
 
 def _make_read_dump(db: Database) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
-        dump_id = int(args["dump_id"])
-        dump = db.get_dump(dump_id)
+    def handler(args: ReadDumpInput) -> dict[str, Any]:
+        dump = db.get_dump(args.dump_id)
         if dump is None:
             raise ToolError(
                 "read_dump",
-                f"dump {dump_id} not found",
+                f"dump {args.dump_id} not found",
             )
         turns = [
             {"id": t.id, "role": t.role, "text": t.text}
-            for t in db.list_turns(dump_id)
+            for t in db.list_turns(args.dump_id)
         ]
-        blueprint = db.get_latest_blueprint(dump_id)
+        blueprint = db.get_latest_blueprint(args.dump_id)
         return {
             "dump": {
                 "id": dump.id,
@@ -243,14 +312,7 @@ def _make_read_dump(db: Database) -> ToolDefinition:
             "blueprint. Raises a structured ToolError if the dump is "
             "missing, mirroring the HTTP 404 contract."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "dump_id": {"type": "integer", "minimum": 1},
-            },
-            "required": ["dump_id"],
-            "additionalProperties": False,
-        },
+        input_model=ReadDumpInput,
         handler=handler,
     )
 
@@ -261,26 +323,17 @@ def _make_read_dump(db: Database) -> ToolDefinition:
 
 
 def _make_append_turn(pipeline: AgentPipeline) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
-        dump_id = int(args["dump_id"])
-        text = args.get("text", "")
-        if not isinstance(text, str) or not text.strip():
+    def handler(args: AppendTurnInput) -> dict[str, Any]:
+        if not args.text.strip():
             raise ToolError(
                 "append_turn",
                 "text cannot be empty",
             )
-        role = args.get("role", "user")
-        if role != "user":
-            # The pipeline only accepts user turns via add_user_turn.
-            raise ToolError(
-                "append_turn",
-                f"role must be 'user' (got {role!r})",
-            )
-        pipeline.add_user_turn(dump_id, text)
-        dump = pipeline.db.get_dump(dump_id)
+        pipeline.add_user_turn(args.dump_id, args.text)
+        dump = pipeline.db.get_dump(args.dump_id)
         return {
-            "dump_id": dump_id,
-            "role": role,
+            "dump_id": args.dump_id,
+            "role": args.role,
             "status": dump.status if dump is not None else None,
         }
 
@@ -291,20 +344,7 @@ def _make_append_turn(pipeline: AgentPipeline) -> ToolDefinition:
             "structured error. Only the 'user' role is supported here; "
             "the active listener writes assistant turns internally."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "dump_id": {"type": "integer", "minimum": 1},
-                "text": {"type": "string", "minLength": 1},
-                "role": {
-                    "type": "string",
-                    "enum": ["user"],
-                    "default": "user",
-                },
-            },
-            "required": ["dump_id", "text"],
-            "additionalProperties": False,
-        },
+        input_model=AppendTurnInput,
         handler=handler,
     )
 
@@ -315,8 +355,8 @@ def _make_append_turn(pipeline: AgentPipeline) -> ToolDefinition:
 
 
 def _make_write_dump(pipeline: AgentPipeline) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
-        title = args.get("title", "").strip() if isinstance(args.get("title"), str) else ""
+    def handler(args: WriteDumpInput) -> dict[str, Any]:
+        title = args.title.strip()
         if not title:
             raise ToolError("write_dump", "title cannot be empty")
         # The pipeline only accepts a transcript audio path or none;
@@ -325,6 +365,8 @@ def _make_write_dump(pipeline: AgentPipeline) -> ToolDefinition:
             title,
             metadata={"origin": "openlaude"},
         )
+        if args.initial_text:
+            pipeline.add_user_turn(dump_id, args.initial_text)
         dump = pipeline.db.get_dump(dump_id)
         return {
             "dump_id": dump_id,
@@ -335,25 +377,11 @@ def _make_write_dump(pipeline: AgentPipeline) -> ToolDefinition:
         name="write_dump",
         description=(
             "Create a new dump tagged with metadata={'origin': 'openlaude'}. "
-            "Returns the new dump id and its initial status. The first "
-            "turn is NOT auto-added; the caller is expected to follow up "
-            "with append_turn + run_pipeline."
+            "Optionally pre-seed the first user turn via initial_text. "
+            "Returns the new dump id and its initial status. The caller "
+            "may follow up with append_turn + run_pipeline."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "title": {"type": "string", "minLength": 1},
-                "initial_text": {
-                    "type": "string",
-                    "description": (
-                        "Optional first user turn. When provided the dump "
-                        "is pre-seeded with this text via add_user_turn."
-                    ),
-                },
-            },
-            "required": ["title"],
-            "additionalProperties": False,
-        },
+        input_model=WriteDumpInput,
         handler=handler,
     )
 
@@ -364,16 +392,12 @@ def _make_write_dump(pipeline: AgentPipeline) -> ToolDefinition:
 
 
 def _make_run_pipeline(pipeline: AgentPipeline) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
-        dump_id = int(args["dump_id"])
-        max_steps = int(args.get("max_steps", 4))
-        if max_steps <= 0:
-            return {"final_status": None, "steps": 0, "last_action": None}
+    def handler(args: RunPipelineInput) -> dict[str, Any]:
         steps = 0
         last_action: str | None = None
         final_status: str | None = None
-        for _ in range(max_steps):
-            result = pipeline.step_listener(dump_id)
+        for _ in range(args.max_steps):
+            result = pipeline.step_listener(args.dump_id)
             steps += 1
             last_action = result.action.value
             final_status = result.status
@@ -393,20 +417,7 @@ def _make_run_pipeline(pipeline: AgentPipeline) -> ToolDefinition:
             "status (currently 'ready'). Returns the final status, the "
             "number of steps actually run, and the last listener action."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "dump_id": {"type": "integer", "minimum": 1},
-                "max_steps": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 32,
-                    "default": 4,
-                },
-            },
-            "required": ["dump_id"],
-            "additionalProperties": False,
-        },
+        input_model=RunPipelineInput,
         handler=handler,
     )
 
@@ -417,14 +428,10 @@ def _make_run_pipeline(pipeline: AgentPipeline) -> ToolDefinition:
 
 
 def _make_search_memory(db: Database) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
-        query = args.get("query", "")
-        if not isinstance(query, str) or not query.strip():
+    def handler(args: SearchMemoryInput) -> dict[str, Any]:
+        if not args.query.strip():
             return {"items": [], "count": 0}
-        limit = int(args.get("limit", 5))
-        if limit <= 0 or limit > 50:
-            limit = 5
-        rows = db.search_chunks(query, limit=limit)
+        rows = db.search_chunks(args.query, limit=args.limit)
         items = [
             {
                 "chunk_id": int(r["chunk_id"]),
@@ -443,20 +450,7 @@ def _make_search_memory(db: Database) -> ToolDefinition:
             "rows (chunk_id, dump_id, snippet, score). Empty queries "
             "are short-circuited to an empty result set."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "minLength": 1},
-                "limit": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 50,
-                    "default": 5,
-                },
-            },
-            "required": ["query"],
-            "additionalProperties": False,
-        },
+        input_model=SearchMemoryInput,
         handler=handler,
     )
 
@@ -466,21 +460,12 @@ def _make_search_memory(db: Database) -> ToolDefinition:
 # ---------------------------------------------------------------------------
 
 
-SyncDirection = Literal["push", "pull", "both"]
-
-
 def _make_sync_storage(
     bridge: "RcloneBridge | None",
     data_dir: Path,
     remote_path: str,
 ) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
-        direction: SyncDirection = args.get("direction", "push")
-        if direction not in ("push", "pull", "both"):
-            raise ToolError(
-                "sync_storage",
-                f"direction must be push|pull|both (got {direction!r})",
-            )
+    def handler(args: SyncStorageInput) -> dict[str, Any]:
         if bridge is None or not bridge.is_available():
             return {
                 "ok": False,
@@ -500,7 +485,7 @@ def _make_sync_storage(
             "bytes_transferred": int(result.bytes_transferred),
             "files_transferred": int(result.files_transferred),
             "duration_seconds": float(result.duration_seconds),
-            "direction": direction,
+            "direction": args.direction,
             "synced_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
         return {
@@ -518,17 +503,7 @@ def _make_sync_storage(
             "push|pull|both; the bridge currently implements push only "
             "but the parameter is accepted for forward compatibility."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "direction": {
-                    "type": "string",
-                    "enum": ["push", "pull", "both"],
-                    "default": "push",
-                },
-            },
-            "additionalProperties": False,
-        },
+        input_model=SyncStorageInput,
         handler=handler,
     )
 
@@ -539,12 +514,12 @@ def _make_sync_storage(
 
 
 def _make_export_bundle(db: Database, data_dir: Path) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
+    def handler(args: ExportBundleInput) -> dict[str, Any]:
         # Imported lazily so the agent can start even when the backup
         # integration is unavailable in some test environments.
         from ..integrations.backup import export_bundle as _export_bundle
 
-        dest_name = args.get("dest_name")
+        dest_name = args.dest_name
         export_dir = data_dir / _EXPORT_SUBDIR
         export_dir.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -573,19 +548,7 @@ def _make_export_bundle(db: Database, data_dir: Path) -> ToolDefinition:
             "Returns the on-disk path, the file size in bytes, and the "
             "backup manifest as a dict."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {
-                "dest_name": {
-                    "type": "string",
-                    "description": (
-                        "Optional zip stem (without .zip). When omitted, "
-                        "a UTC timestamp is used."
-                    ),
-                },
-            },
-            "additionalProperties": False,
-        },
+        input_model=ExportBundleInput,
         handler=handler,
     )
 
@@ -611,7 +574,7 @@ def _manifest_to_dict(manifest: Any) -> dict[str, Any]:
 
 
 def _make_current_profile(db: Database) -> ToolDefinition:
-    def handler(args: dict[str, Any]) -> dict[str, Any]:
+    def handler(_args: EmptyInput) -> dict[str, Any]:
         profile = db.get_profile()
         return {
             "name": profile.name,
@@ -628,18 +591,23 @@ def _make_current_profile(db: Database) -> ToolDefinition:
             "streak_days, and an XP-to-next-level hint. The M5 gamification "
             "pipeline updates this in place; this tool only reads."
         ),
-        input_schema={
-            "type": "object",
-            "properties": {},
-            "additionalProperties": False,
-        },
+        input_model=EmptyInput,
         handler=handler,
     )
 
 
 __all__ = [
+    "AppendTurnInput",
+    "EmptyInput",
+    "ExportBundleInput",
+    "ListDumpsInput",
+    "ReadDumpInput",
+    "RunPipelineInput",
+    "SearchMemoryInput",
     "SyncDirection",
+    "SyncStorageInput",
     "ToolDefinition",
     "ToolError",
+    "WriteDumpInput",
     "build_tools",
 ]

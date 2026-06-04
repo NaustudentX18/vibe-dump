@@ -13,6 +13,14 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 web = ["fastapi>=0.118", "uvicorn>=0.30"]
+# Pydantic AI + Graph + Instructor for the M9.5 openlaude runtime.
+# Optional so the inline tool-use loop remains the always-on fallback.
+agent = [
+    "pydantic-ai>=1.0",
+    "pydantic-graph>=1.0",
+    "instructor>=1.0",
+]
+all = ["vibe-dump[web,dev,agent]"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

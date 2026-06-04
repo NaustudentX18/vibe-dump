@@ -19,7 +19,12 @@ from typing import Any
 import pytest
 
 from vibedump.active_listener import ListenerAction
-from vibedump.agent_pipeline import AgentPipeline
+from vibedump.agent_pipeline import (
+    AgentPipeline,
+    DumpState,
+    GraphPipeline,
+    _GRAPH_STATE_KEY,
+)
 from vibedump.database import Database
 from vibedump.events import EventBus
 from vibedump.providers import ProviderRegistry
@@ -347,3 +352,75 @@ def test_backward_compat_ingest_fake_into_dump_still_works(pipeline: Any) -> Non
     result = p.ingest_fake_into_dump(dump_id, "idea.wav")
     assert result.dump_id == dump_id
     assert "idea.wav" in result.transcript
+
+
+# ---------------------------------------------------------------------------
+# M9.5: GraphPipeline (pydantic-graph)
+# ---------------------------------------------------------------------------
+
+
+def test_graph_persists_state_to_db(pipeline: Any) -> None:
+    """GraphPipeline.run() drives the graph and persists state per node.
+
+    The M9.5 graph runner writes the DumpState into
+    ``dumps.metadata_json`` under the reserved ``_GRAPH_STATE_KEY`` on
+    every transition. dumps.status is updated by the embedded
+    AgentPipeline and reflects the final READY state.
+    """
+    p, llm, db, _ = pipeline
+    dump_id = p.start_dump("Graph Dump", audio_path="idea.wav")
+    llm._responses = [
+        "[FINALIZE] we have enough",
+        blueprint_template("Graph Dump"),
+    ]
+
+    graph = GraphPipeline(p)
+    blueprint = graph.run(dump_id, max_steps=4)
+
+    assert _missing_sections(blueprint) == []
+    assert db.get_dump(dump_id).status == "ready"
+
+    # State survives in metadata_json under the reserved key.
+    dump = db.get_dump(dump_id)
+    raw = dump.metadata.get(_GRAPH_STATE_KEY)
+    assert raw, "graph state must be persisted to dumps.metadata_json"
+    state = DumpState.model_validate_json(raw)
+    assert state.dump_id == dump_id
+    assert state.current_status == "ready"
+    assert state.last_action == "finalize"
+    assert state.blueprint == blueprint
+
+
+def test_graph_replays_from_intermediate_node(pipeline: Any) -> None:
+    """A ASK-then-FINALIZE run replays from the listening state.
+
+    First call: LLM returns ASK; graph persists state with
+    current_status=listening and last_action=ask. Second call reloads
+    the DumpState from disk and continues without re-running the
+    prior step.
+    """
+    p, llm, db, _ = pipeline
+    dump_id = p.start_dump("Replay Dump", audio_path="idea.wav")
+    graph = GraphPipeline(p)
+
+    # Step 1: listener asks a follow-up.
+    llm._responses = ["[ASK] which platform?"]
+    first = graph.run(dump_id, max_steps=1)
+    assert first == ""  # no blueprint yet
+    assert db.get_dump(dump_id).status == "listening"
+
+    state = graph.load_state(dump_id)
+    assert state.current_status == "listening"
+    assert state.last_action == "ask"
+
+    # User responds; listener finalises.
+    p.add_user_turn(dump_id, "iOS first")
+    llm._responses = ["[FINALIZE] got it", blueprint_template("Replay Dump")]
+    blueprint = graph.run(dump_id, max_steps=2)
+
+    assert _missing_sections(blueprint) == []
+    assert db.get_dump(dump_id).status == "ready"
+    final = graph.load_state(dump_id)
+    assert final.current_status == "ready"
+    assert final.last_action == "finalize"
+    assert final.blueprint == blueprint

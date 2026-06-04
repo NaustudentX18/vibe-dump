@@ -726,6 +726,12 @@
       <div id="agentJobList" class="dump-list" style="max-height:35vh;"></div>
       <button class="btn" id="agentRefreshBtn" type="button" style="margin-top:6px;">↻ Refresh</button>
     </div>
+    <details class="field" id="tracePanelWrap">
+      <summary style="cursor:pointer; font-weight:600;">🛰 Trace (last 50)</summary>
+      <div id="traceList" class="dump-list" style="max-height:30vh; margin-top:6px;">
+        <div class="empty">No agent runs yet.</div>
+      </div>
+    </details>
   </aside>
 
   <main class="app-main">
@@ -1301,6 +1307,17 @@
         loadAgentJobs();
         loadAgentHealth();
       });
+      es.addEventListener("agent.trace", (e) => {
+        // M9.5: agent runner publishes a per-run summary. Push it into
+        // the Trace panel and keep only the most recent 50 runs.
+        try {
+          const data = JSON.parse(e.data).payload || {};
+          state.traceRuns = (state.traceRuns || []).concat([data]).slice(-50);
+          renderTracePanel();
+        } catch (_) {
+          // Telemetry is best-effort; never break SSE handling.
+        }
+      });
       es.onerror = () => { setTimeout(connectSSE, 3000); };
     }
 
@@ -1389,6 +1406,42 @@
         empty.className = "empty";
         empty.textContent = `Jobs unavailable: ${e.message}`;
         root.appendChild(empty);
+      }
+    }
+
+    function renderTracePanel() {
+      const root = $("#traceList");
+      if (!root) return;
+      const runs = state.traceRuns || [];
+      root.innerHTML = "";
+      if (!runs.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No agent runs yet.";
+        root.appendChild(empty);
+        return;
+      }
+      // Show newest first.
+      for (let i = runs.length - 1; i >= 0; i--) {
+        const r = runs[i];
+        const row = document.createElement("div");
+        row.className = "ach-row";
+        const title = document.createElement("div");
+        title.className = "ach-title";
+        title.textContent = `${r.model || "agent"} · ${r.steps || 0} steps · ${r.tool_call_count || 0} tools · ${r.duration_ms || 0} ms`;
+        const desc = document.createElement("div");
+        desc.className = "ach-desc";
+        const preview = (r.final_message_preview || "").toString().replace(/\s+/g, " ").trim();
+        desc.textContent = preview ? preview.slice(0, 120) : "(no final message)";
+        row.appendChild(title);
+        row.appendChild(desc);
+        if (r.tool_calls && r.tool_calls.length) {
+          const toolsLine = document.createElement("div");
+          toolsLine.className = "ach-desc";
+          toolsLine.textContent = "tools: " + r.tool_calls.map((t) => t.name).join(", ");
+          row.appendChild(toolsLine);
+        }
+        root.appendChild(row);
       }
     }
 
