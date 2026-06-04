@@ -652,6 +652,49 @@
       <button class="btn" type="submit">Save provider</button>
     </form>
     <div class="health-list" id="healthList"></div>
+
+    <h2>☁ Storage</h2>
+    <div id="storageStatus" class="field" aria-live="polite">
+      <div class="health-row" id="storageRcloneRow">
+        <span class="health-dot" id="storageRcloneDot"></span>
+        <span id="storageRcloneLabel">Checking rclone…</span>
+      </div>
+      <div class="field">
+        <label for="storageRemote">rclone remote</label>
+        <input id="storageRemote" placeholder="gdrive:" maxlength="120" />
+        <div class="xp-info" id="storageRemoteHelp">UI-only · set VIBEDUMP_RCLONE_REMOTE to change at runtime</div>
+      </div>
+      <div class="field">
+        <label>Host layout</label>
+        <pre id="storageHostLayout" class="empty" style="text-align:left;margin:0;white-space:pre-wrap;">—</pre>
+      </div>
+      <div class="field">
+        <label>Last export</label>
+        <div id="storageLastExport" class="xp-info">never</div>
+      </div>
+      <div class="field">
+        <label>Last sync</label>
+        <div id="storageLastSync" class="xp-info">never</div>
+      </div>
+      <div class="row-actions">
+        <button class="btn primary" id="storageSyncBtn" type="button">☁ Sync now</button>
+        <button class="btn" id="storageExportBtn" type="button">📦 Export bundle</button>
+      </div>
+      <div class="field">
+        <label for="storageImportFile">Import bundle (.zip)</label>
+        <input id="storageImportFile" type="file" accept=".zip,application/zip" />
+        <button class="btn" id="storageImportBtn" type="button" style="margin-top:6px;">📥 Import bundle</button>
+      </div>
+      <details class="field">
+        <summary style="cursor:pointer;font-size:0.85rem;color:var(--text-secondary);">🔒 Preview redaction</summary>
+        <div style="margin-top:6px;">
+          <label for="storageRedactInput" style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.08em;">Config JSON</label>
+          <textarea id="storageRedactInput" rows="4" placeholder='{"api_key":"sk-...","model":"gpt-4"}'></textarea>
+          <button class="btn" id="storageRedactBtn" type="button" style="margin-top:6px;">Preview redaction</button>
+          <pre id="storageRedactOutput" class="empty" style="text-align:left;margin:6px 0 0;white-space:pre-wrap;">—</pre>
+        </div>
+      </details>
+    </div>
   </aside>
 
   <main class="app-main">
@@ -729,6 +772,11 @@
       pttStart: "/api/hardware/ptt/start",
       pttCancel: "/api/hardware/ptt/cancel",
       pttJob: (id) => `/api/hardware/ptt/${id}`,
+      storageStatus: "/api/storage/status",
+      storageSync: "/api/storage/sync",
+      storageExport: "/api/storage/export",
+      storageImport: "/api/storage/import",
+      storageRedact: "/api/storage/redact-preview",
     };
 
     async function api(path, opts = {}) {
@@ -1171,6 +1219,27 @@
         // Refresh the active dump's transcript so the new turn shows up.
         if (state.selectedId) selectDump(state.selectedId);
       });
+      es.addEventListener("storage.sync_ok", () => {
+        showToast("☁ Sync complete");
+        loadStorageStatus();
+      });
+      es.addEventListener("storage.sync_failed", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        showToast(`☁ Sync failed: ${data.error || "unknown error"}`);
+        loadStorageStatus();
+      });
+      es.addEventListener("storage.export_ok", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        showToast(`📦 Exported bundle (${data.size_bytes || 0} B)`);
+        loadStorageStatus();
+      });
+      es.addEventListener("storage.import_ok", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        const m = data.manifest || {};
+        showToast(`📥 Imported ${m.dump_count || 0} dumps`);
+        loadStorageStatus();
+        loadDumps();
+      });
       es.onerror = () => { setTimeout(connectSSE, 3000); };
     }
 
@@ -1278,6 +1347,7 @@
       });
 
       bindPttButton();
+      bindStorageEvents();
     }
 
     function bindPttButton() {
@@ -1332,6 +1402,168 @@
       btn.addEventListener("click", (ev) => ev.preventDefault());
     }
 
+    async function loadStorageStatus() {
+      const root = $("#storageStatus");
+      if (!root) return;
+      try {
+        const data = await api(API.storageStatus);
+        renderStorageStatus(data);
+      } catch (e) {
+        const dot = $("#storageRcloneDot");
+        const label = $("#storageRcloneLabel");
+        if (dot) dot.style.background = "var(--accent-bad)";
+        if (label) label.textContent = `Storage unavailable: ${e.message}`;
+      }
+    }
+
+    function renderStorageStatus(data) {
+      const dot = $("#storageRcloneDot");
+      const label = $("#storageRcloneLabel");
+      if (dot) dot.style.background = data.rclone_available ? "var(--accent-good)" : "var(--accent-bad)";
+      if (label) {
+        label.textContent = data.rclone_available
+          ? `rclone ready · ${data.remote}`
+          : `rclone missing · remote ${data.remote}`;
+      }
+      const remoteInput = $("#storageRemote");
+      if (remoteInput) {
+        remoteInput.value = data.remote || "";
+        remoteInput.placeholder = data.remote || "gdrive:";
+      }
+      const layout = $("#storageHostLayout");
+      if (layout) {
+        const entries = Object.entries(data.host_layout || {})
+          .map(([k, v]) => `${k}: ${v}`)
+          .join("\n");
+        layout.textContent = entries || "—";
+      }
+      const lastExport = $("#storageLastExport");
+      if (lastExport) {
+        lastExport.textContent = data.last_export_at
+          ? new Date(data.last_export_at + "Z").toLocaleString()
+          : "never";
+      }
+      const lastSync = $("#storageLastSync");
+      if (lastSync) {
+        const syncTime = data.last_sync_at
+          ? new Date(data.last_sync_at + "Z").toLocaleString()
+          : "never";
+        const last = data.last_sync_result;
+        const detail = last
+          ? (last.ok
+              ? ` · ${last.files_transferred} files · ${last.bytes_transferred} B`
+              : ` · failed: ${last.error || "unknown"}`)
+          : "";
+        lastSync.textContent = `${syncTime}${detail}`;
+      }
+    }
+
+    async function storageSync() {
+      const btn = $("#storageSyncBtn");
+      if (!btn) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(API.storageSync, { method: "POST", headers: { "content-type": "application/json" } });
+        const body = await res.json().catch(() => ({}));
+        if (res.ok && body.ok) {
+          showToast("☁ Sync complete");
+        } else {
+          showToast(`☁ Sync failed: ${body.detail || body.error || res.statusText}`);
+        }
+        await loadStorageStatus();
+      } catch (e) {
+        showToast(`☁ Sync error: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function storageExport() {
+      const btn = $("#storageExportBtn");
+      if (!btn) return;
+      btn.disabled = true;
+      try {
+        const res = await api(API.storageExport, { method: "POST", body: JSON.stringify({}) });
+        showToast(`📦 Exported bundle (${res.size_bytes} B)`);
+        await loadStorageStatus();
+      } catch (e) {
+        showToast(`📦 Export failed: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function storageImport() {
+      const fileInput = $("#storageImportFile");
+      const btn = $("#storageImportBtn");
+      if (!fileInput || !btn) return;
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return showToast("Pick a .zip bundle first");
+      btn.disabled = true;
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        const res = await fetch(API.storageImport, { method: "POST", body: fd });
+        if (!res.ok) {
+          const text = await res.text();
+          throw new Error(`${res.status} ${text || res.statusText}`);
+        }
+        const body = await res.json();
+        showToast(`📥 Imported ${body.manifest.dump_count} dumps`);
+        await loadStorageStatus();
+        await loadDumps();
+      } catch (e) {
+        showToast(`📥 Import failed: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function storageRedactPreview() {
+      const input = $("#storageRedactInput");
+      const output = $("#storageRedactOutput");
+      const btn = $("#storageRedactBtn");
+      if (!input || !output || !btn) return;
+      const raw = input.value.trim();
+      if (!raw) return showToast("Paste a config JSON first");
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch { return showToast("Config must be valid JSON"); }
+      btn.disabled = true;
+      try {
+        const res = await api(API.storageRedact, {
+          method: "POST",
+          body: JSON.stringify({ config: parsed }),
+        });
+        output.textContent = JSON.stringify(res.redacted, null, 2);
+      } catch (e) {
+        showToast(`Redact preview failed: ${e.message}`);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function bindStorageEvents() {
+      const syncBtn = $("#storageSyncBtn");
+      const exportBtn = $("#storageExportBtn");
+      const importBtn = $("#storageImportBtn");
+      const redactBtn = $("#storageRedactBtn");
+      const remoteInput = $("#storageRemote");
+      syncBtn?.addEventListener("click", storageSync);
+      exportBtn?.addEventListener("click", storageExport);
+      importBtn?.addEventListener("click", storageImport);
+      redactBtn?.addEventListener("click", storageRedactPreview);
+      // Remote is a UI-only setting: store in localStorage so the input
+      // is sticky between reloads, but DO NOT POST it (the server reads
+      // VIBEDUMP_RCLONE_REMOTE at process start).
+      const saved = localStorage.getItem("vibedump.storageRemote");
+      if (saved && remoteInput && !remoteInput.value) remoteInput.value = saved;
+      remoteInput?.addEventListener("change", (e) => {
+        localStorage.setItem("vibedump.storageRemote", e.target.value.trim());
+        showToast("Remote stored locally (UI only — set VIBEDUMP_RCLONE_REMOTE for the server)");
+      });
+    }
+
     async function init() {
       bindEvents();
       try {
@@ -1346,6 +1578,7 @@
           loadProfile(),
           loadAchievements(),
           loadDefaultLlmOptions(),
+          loadStorageStatus(),
         ]);
         setMascotState("idle");
         connectSSE();

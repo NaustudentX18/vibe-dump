@@ -12,9 +12,11 @@ not installed so the package still imports cleanly for the database / RAG tests.
 import base64
 import json
 import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any, Iterator
 from uuid import uuid4
@@ -34,6 +36,12 @@ from .integrations.audio_capture import (
     AudioCapture,
     AudioCaptureNotAvailable,
     make_audio_capture,
+)
+from .integrations.rclone_sync import (
+    HOST_LAYOUT,
+    RcloneBridge,
+    SyncResult,
+    make_rclone,
 )
 from .integrations.pisugar import (
     BatteryReading,
@@ -104,6 +112,14 @@ class AppState:
     # In-process PTT job registry. Keyed by ``uuid4().hex``.
     ptt_jobs: dict[str, PttJob] = field(default_factory=dict)
     ptt_lock: threading.Lock = field(default_factory=threading.Lock)
+    # M6 storage: rclone bridge, local data dir, and the in-memory snapshot
+    # of the last export/sync timestamps + their results. The data dir is
+    # only used as a parent for derived paths (exports/, audio/, etc.).
+    rclone: RcloneBridge | None = None
+    data_dir: Path = field(default_factory=lambda: Path(tempfile.gettempdir()) / "vibedump")
+    # Tracks the most recent storage activity for the dashboard's status
+    # drawer. Keyed by string attribute name; values are JSON-serialisable.
+    storage_state: dict[str, Any] = field(default_factory=dict)
 
     def close(self) -> None:
         if self.pisugar_monitor is not None:
@@ -162,6 +178,10 @@ def _create_default_state() -> AppState:
         state.audio_capture = make_audio_capture(prefer="auto")
     except AudioCaptureNotAvailable:
         state.audio_capture = None
+    # M6: rclone bridge. ``make_rclone`` already does the auto-fallback to
+    # the in-memory fake when the real binary is missing, so we don't have
+    # to guard with a try/except like the hardware bridges above.
+    state.rclone = make_rclone("auto")
     return state
 
 
@@ -242,7 +262,18 @@ def _battery_to_dict(reading: BatteryReading) -> dict[str, Any]:
 def create_app(state: AppState | None = None) -> Any:
     """Create the FastAPI app, wiring routes to the provided state."""
     try:
-        from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+        from fastapi import (
+            Depends,
+            FastAPI,
+            File,
+            Form,
+            HTTPException,
+            Query,
+            Request,
+            Response,
+            UploadFile,
+            status,
+        )
         from fastapi.responses import HTMLResponse, StreamingResponse
         from pydantic import BaseModel, Field
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dep path
@@ -284,6 +315,12 @@ def create_app(state: AppState | None = None) -> Any:
 
     class PttCancelRequest(BaseModel):
         job_id: str = Field(min_length=1, max_length=64)
+
+    class StorageExportRequest(BaseModel):
+        dest_name: str | None = Field(default=None, max_length=120)
+
+    class StorageRedactPreviewRequest(BaseModel):
+        config: dict[str, Any] = Field(default_factory=dict)
 
     def get_state(request: Request) -> AppState:
         return request.app.state.vibedump  # type: ignore[no-any-return]
@@ -752,6 +789,230 @@ def create_app(state: AppState | None = None) -> Any:
         if job is None:
             raise HTTPException(status_code=404, detail="ptt job not found")
         return _ptt_to_dict(job)
+
+    # ------------------------------------------------------------------
+    # M6: Storage HTTP routes (rclone sync, bundle export/import, redact
+    # preview). All five routes share a single helper to publish a
+    # ``storage.*`` bus event so the dashboard's SSE listener can toast on
+    # completion without polling.
+    # ------------------------------------------------------------------
+
+    def _publish_storage(event_kind: str, **payload: Any) -> None:
+        try:
+            app_state.bus.publish(f"storage.{event_kind}", payload)
+        except Exception:
+            # The bus is best-effort for UI feedback; never let a publish
+            # error break the storage route.
+            pass
+
+    def _storage_remote_name() -> str:
+        """Return the configured remote name (env var) for display.
+
+        Always returns the env-driven name regardless of bridge availability
+        so the dashboard can show the operator what *would* be used.
+        """
+        from .integrations.rclone_sync import REMOTE_ENV_VAR
+
+        return os.environ.get(REMOTE_ENV_VAR, "gdrive:")
+
+    @app.get("/api/storage/status")
+    def storage_status(st: State) -> dict[str, Any]:  # type: ignore[valid-type]
+        bridge = st.rclone
+        rclone_available = bool(bridge is not None and bridge.is_available())
+        snapshot = dict(st.storage_state)
+        return {
+            "rclone_available": rclone_available,
+            "remote": _storage_remote_name(),
+            "host_layout": dict(HOST_LAYOUT),
+            "last_export_at": snapshot.get("last_export_at"),
+            "last_sync_at": snapshot.get("last_sync_at"),
+            "last_sync_result": snapshot.get("last_sync_result"),
+        }
+
+    @app.post("/api/storage/sync")
+    def storage_sync(st: State) -> dict[str, Any]:  # type: ignore[valid-type]
+        bridge = st.rclone
+        if bridge is None or not bridge.is_available():
+            raise HTTPException(
+                status_code=503,
+                detail="rclone bridge is not available on this host",
+            )
+        # Sync the entire host data dir to the remote. The remote path
+        # itself is the bucket root; the bridge is responsible for naming.
+        host_dir = st.data_dir
+        host_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            result = bridge.sync(host_dir, "vibedump")
+        except Exception as exc:  # defensive: bridge contract may raise
+            raise HTTPException(status_code=502, detail=f"sync failed: {exc}") from exc
+        result_dict = {
+            "ok": result.ok,
+            "bytes_transferred": result.bytes_transferred,
+            "files_transferred": result.files_transferred,
+            "duration_seconds": result.duration_seconds,
+            "error": result.error,
+        }
+        if not result.ok:
+            # Mirror the real error from the bridge into the response body
+            # so the dashboard can show it; HTTP 502 because the upstream
+            # (rclone remote) is what failed.
+            _publish_storage("sync_failed", error=result.error or "unknown error")
+            raise HTTPException(
+                status_code=502,
+                detail=result.error or "sync failed",
+            )
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        st.storage_state["last_sync_at"] = now_iso
+        st.storage_state["last_sync_result"] = result_dict
+        _publish_storage("sync_ok", synced_at=now_iso, **result_dict)
+        return {"ok": True, "manifest": None, "error": None}
+
+    @app.post("/api/storage/export")
+    def storage_export(
+        body: StorageExportRequest,
+        st: State,  # type: ignore[valid-type]
+    ) -> dict[str, Any]:
+        try:
+            from .integrations.backup import export_bundle
+        except ImportError as exc:  # pragma: no cover - defensive
+            raise HTTPException(
+                status_code=503,
+                detail=f"backup integration is not available: {exc}",
+            ) from exc
+        dest_dir = st.data_dir / "exports"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        suffix = body.dest_name.strip() if body.dest_name and body.dest_name.strip() else stamp
+        # Sanitise the suffix: keep alnum/dot/dash/underscore only, fall
+        # back to the timestamp when nothing valid remains.
+        import re as _re
+
+        clean = _re.sub(r"[^A-Za-z0-9._-]+", "_", suffix).strip("._-") or stamp
+        dest_zip = dest_dir / f"vibedump-{clean}.zip"
+        audio_dir = st.data_dir / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            manifest = export_bundle(st.db, audio_dir, dest_zip)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"export failed: {exc}") from exc
+        try:
+            size_bytes = dest_zip.stat().st_size
+        except OSError:
+            size_bytes = 0
+        from dataclasses import asdict
+
+        manifest_dict = asdict(manifest)
+        now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        st.storage_state["last_export_at"] = now_iso
+        st.storage_state["last_export_path"] = str(dest_zip)
+        st.storage_state["last_export_manifest"] = manifest_dict
+        _publish_storage(
+            "export_ok",
+            path=str(dest_zip),
+            manifest=manifest_dict,
+            size_bytes=size_bytes,
+        )
+        return {
+            "ok": True,
+            "path": str(dest_zip),
+            "manifest": manifest_dict,
+            "size_bytes": size_bytes,
+        }
+
+    @app.post("/api/storage/import")
+    async def storage_import(
+        st: State,  # type: ignore[valid-type]
+        file: UploadFile = File(...),
+    ) -> dict[str, Any]:
+        try:
+            from .integrations.backup import BACKUP_VERSION, import_bundle
+        except ImportError as exc:  # pragma: no cover - defensive
+            raise HTTPException(
+                status_code=503,
+                detail=f"backup integration is not available: {exc}",
+            ) from exc
+        if file is None or not file.filename:
+            raise HTTPException(status_code=400, detail="no file provided")
+        if not file.filename.lower().endswith(".zip"):
+            raise HTTPException(
+                status_code=415,
+                detail=f"unsupported media type: expected .zip, got {file.filename!r}",
+            )
+        # Spool the upload to a temp file so import_bundle can read it
+        # as a real zip path. ``delete=False`` because zipfile may
+        # reopen it on some platforms.
+        import tempfile as _tempfile
+
+        tmp_fd, tmp_path = _tempfile.mkstemp(prefix="vibedump-import-", suffix=".zip")
+        try:
+            with os.fdopen(tmp_fd, "wb") as out:
+                while True:
+                    chunk = await file.read(64 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+        try:
+            # Peek at the manifest to surface a 422 on version mismatch
+            # *before* mutating the database.
+            import json as _json
+            import zipfile as _zipfile
+
+            try:
+                with _zipfile.ZipFile(tmp_path, "r") as zf:
+                    manifest_raw = zf.read("manifest.json").decode("utf-8")
+                manifest_obj = _json.loads(manifest_raw)
+            except (KeyError, _zipfile.BadZipFile, _json.JSONDecodeError) as exc:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"invalid backup bundle: {exc}",
+                ) from exc
+            bundle_version = manifest_obj.get("version") if isinstance(manifest_obj, dict) else None
+            if bundle_version != BACKUP_VERSION:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"backup version mismatch: bundle={bundle_version!r} "
+                        f"host={BACKUP_VERSION!r}"
+                    ),
+                )
+            audio_dir = st.data_dir / "audio"
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            manifest = import_bundle(st.db, audio_dir, Path(tmp_path))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"import failed: {exc}") from exc
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        from dataclasses import asdict
+
+        manifest_dict = asdict(manifest)
+        _publish_storage("import_ok", manifest=manifest_dict)
+        return {"ok": True, "manifest": manifest_dict}
+
+    @app.post("/api/storage/redact-preview")
+    def storage_redact_preview(
+        body: StorageRedactPreviewRequest,
+    ) -> dict[str, Any]:
+        try:
+            from .integrations.config_redact import redact
+        except ImportError as exc:  # pragma: no cover - defensive
+            raise HTTPException(
+                status_code=503,
+                detail=f"config_redact integration is not available: {exc}",
+            ) from exc
+        return {"redacted": redact(body.config)}
+
+    return app
 
     return app
 
