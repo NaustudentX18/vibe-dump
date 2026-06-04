@@ -66,6 +66,31 @@ class ProviderConfigRecord:
     updated_at: str
 
 
+@dataclass(frozen=True, slots=True)
+class AchievementRecord:
+    key: str
+    title: str
+    description: str
+    unlocked_at: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileRecord:
+    name: str
+    xp: int
+    level: int
+    streak_days: int
+
+
+DEFAULT_ACHIEVEMENTS: list[tuple[str, str, str]] = [
+    ("first_dump", "First Dump", "Create your first vibe dump."),
+    ("first_blueprint", "Spec Goblin", "Generate your first blueprint."),
+    ("streak_3", "3-Day Streak", "Use Vibe-Dump three days running."),
+    ("level_2", "Apprentice", "Reach level 2."),
+    ("xp_100", "Centurion", "Earn 100 XP."),
+]
+
+
 class Database:
     """Small serialized SQLite wrapper with WAL, FK enforcement, and FTS5."""
 
@@ -218,6 +243,10 @@ class Database:
                 (str(SCHEMA_VERSION),),
             )
             conn.execute("INSERT OR IGNORE INTO profile(id) VALUES(1)")
+            conn.executemany(
+                "INSERT OR IGNORE INTO achievements(key, title, description) VALUES(?, ?, ?)",
+                DEFAULT_ACHIEVEMENTS,
+            )
 
     def create_dump(self, title: str, metadata: dict[str, Any] | None = None) -> int:
         with self.transaction() as conn:
@@ -403,3 +432,117 @@ class Database:
             raise ValueError(f"unsupported count table: {table}")
         with self._lock:
             return int(self._conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+
+    def seed_achievements(self, rows: list[tuple[str, str, str]]) -> None:
+        """Bulk-insert achievement definitions keyed by ``key``.
+
+        Uses ``INSERT OR IGNORE`` so re-seeding is a no-op for existing rows.
+        """
+        with self.transaction() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO achievements(key, title, description) VALUES(?, ?, ?)",
+                rows,
+            )
+
+    def unlock_achievement(self, key: str) -> bool:
+        """Mark an achievement as unlocked the first time.
+
+        Returns True if this call newly unlocked it, False if it was already
+        unlocked or the key is unknown. Never raises on unknown keys.
+        """
+        with self.transaction() as conn:
+            cur = conn.execute(
+                """
+                UPDATE achievements
+                SET unlocked_at = CURRENT_TIMESTAMP
+                WHERE key = ? AND unlocked_at IS NULL
+                """,
+                (key,),
+            )
+            return cur.rowcount > 0
+
+    def list_achievements(self) -> list[AchievementRecord]:
+        """Return all seeded achievements (locked + unlocked) in stable order."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT key, title, description, unlocked_at FROM achievements ORDER BY id ASC"
+            ).fetchall()
+        return [
+            AchievementRecord(
+                key=row["key"],
+                title=row["title"],
+                description=row["description"],
+                unlocked_at=row["unlocked_at"],
+            )
+            for row in rows
+        ]
+
+    def get_profile(self) -> ProfileRecord:
+        """Return the singleton profile row."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT name, xp, level, streak_days FROM profile WHERE id = 1"
+            ).fetchone()
+        if row is None:
+            raise RuntimeError("profile row missing — call db.initialize() first")
+        return ProfileRecord(
+            name=row["name"],
+            xp=int(row["xp"]),
+            level=int(row["level"]),
+            streak_days=int(row["streak_days"]),
+        )
+
+    def update_profile_name(self, name: str) -> bool:
+        """Update the profile name and bump ``updated_at``."""
+        with self.transaction() as conn:
+            cur = conn.execute(
+                """
+                UPDATE profile
+                SET name = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+                """,
+                (name,),
+            )
+            return cur.rowcount > 0
+
+    def grant_xp(self, amount: int) -> ProfileRecord:
+        """Add ``amount`` to profile.xp and recompute level.
+
+        Level rule: ``level = 1 + (xp // 100)``. Returns the updated record.
+        """
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE profile
+                SET xp = xp + ?,
+                    level = 1 + ((xp + ?) / 100),
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+                """,
+                (amount, amount),
+            )
+            row = conn.execute(
+                "SELECT name, xp, level, streak_days FROM profile WHERE id = 1"
+            ).fetchone()
+        return ProfileRecord(
+            name=row["name"],
+            xp=int(row["xp"]),
+            level=int(row["level"]),
+            streak_days=int(row["streak_days"]),
+        )
+
+    def increment_streak(self) -> int:
+        """Increment ``streak_days`` by 1 and return the new value."""
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE profile
+                SET streak_days = streak_days + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+                """
+            )
+            row = conn.execute(
+                "SELECT streak_days FROM profile WHERE id = 1"
+            ).fetchone()
+        return int(row["streak_days"])

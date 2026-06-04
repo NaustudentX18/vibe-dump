@@ -220,42 +220,20 @@
       width: 96px; height: 96px;
       margin: 0 auto;
       position: relative;
+      display: inline-block;
     }
-    .mascot .body {
-      position: absolute; inset: 8px;
-      background: radial-gradient(circle at 35% 30%, #d6a85e 0%, #b78a3a 60%, #7d5a1d 100%);
-      border-radius: 50% 50% 45% 45% / 60% 60% 40% 40%;
-      box-shadow: inset 0 -6px 12px rgba(0, 0, 0, 0.35), 0 4px 16px rgba(183, 138, 58, 0.35);
+    .mascot.is-listening img { animation: bounce 1.1s ease-in-out infinite; }
+    .mascot.is-thinking  img { animation: squish 0.6s ease-in-out infinite; }
+    .mascot.is-speaking  img { animation: speak 0.4s ease-in-out infinite; }
+    .mascot.is-error img { filter: hue-rotate(-30deg) saturate(1.4); }
+    .mascot img {
+      display: block;
+      width: 96px;
+      height: 96px;
+      image-rendering: -webkit-optimize-contrast;
+      user-select: none;
+      -webkit-user-drag: none;
     }
-    .mascot .eye {
-      position: absolute;
-      width: 12px; height: 14px;
-      background: #fff;
-      border-radius: 50%;
-      top: 36px;
-      box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.15);
-    }
-    .mascot .eye.left  { left: 32px; }
-    .mascot .eye.right { right: 32px; }
-    .mascot .pupil {
-      position: absolute;
-      width: 6px; height: 6px;
-      background: #0a0c14;
-      border-radius: 50%;
-      top: 4px; left: 3px;
-    }
-    .mascot .mouth {
-      position: absolute;
-      left: 50%; top: 60px;
-      transform: translateX(-50%);
-      width: 22px; height: 10px;
-      background: #4a2a10;
-      border-radius: 0 0 12px 12px;
-    }
-    .mascot.is-listening .body { animation: bounce 1.1s ease-in-out infinite; }
-    .mascot.is-thinking  .body { animation: squish 0.6s ease-in-out infinite; }
-    .mascot.is-speaking  .mouth { animation: speak 0.4s ease-in-out infinite; }
-    .mascot.is-error .eye { background: var(--accent-bad); }
     @keyframes bounce {
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-4px); }
@@ -541,6 +519,49 @@
       background: var(--accent-good);
     }
     .health-row[data-ok="false"] .health-dot { background: var(--accent-bad); }
+
+    /* M5: XP bar, achievements, inline editor */
+    .xp-bar {
+      width: 100%;
+      height: 6px;
+      background: var(--bg-elev-1);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-pill);
+      overflow: hidden;
+      margin: 6px 0;
+    }
+    .xp-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-violet));
+      transition: width var(--duration-normal) var(--ease-out-expo);
+    }
+    .ach-row {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: var(--bg-elev-1);
+      margin-bottom: 6px;
+      transition: opacity var(--duration-normal) var(--ease-out-expo),
+                  box-shadow var(--duration-normal) var(--ease-out-expo);
+    }
+    .ach-row.is-locked { opacity: 0.4; }
+    .ach-row.is-new {
+      box-shadow: 0 0 0 1px var(--accent-good), 0 0 12px rgba(88, 224, 164, 0.5);
+      animation: pulse 1.4s ease-in-out 2;
+    }
+    .ach-row .ach-title { font-size: 0.85rem; font-weight: 600; }
+    .ach-row .ach-desc { font-size: 0.75rem; color: var(--text-secondary); }
+    .field-row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-bottom: var(--space-2);
+    }
+    .field-row input { flex: 1; }
+    .xp-info { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
   </style>
 </head>
 <body>
@@ -570,6 +591,26 @@
   </nav>
 
   <aside class="drawer right" id="settingsDrawer" aria-label="Settings">
+    <h2>Profile</h2>
+    <div class="field">
+      <span id="profileName">Loading…</span>
+      <div class="xp-bar" id="xpBar"><div class="xp-fill" id="xpFill"></div></div>
+      <div class="xp-info" id="xpInfo">—</div>
+      <div class="field-row">
+        <input id="newProfileName" placeholder="Edit name" maxlength="80" />
+        <button class="btn" id="saveProfileName" type="button">Save</button>
+      </div>
+    </div>
+
+    <h2>Achievements</h2>
+    <div id="achList"></div>
+
+    <h2>Default LLM</h2>
+    <div class="field">
+      <select id="defaultLlm" aria-label="Default LLM provider"></select>
+      <button class="btn" id="saveDefaultLlm" type="button">Save default</button>
+    </div>
+
     <h2>New Dump</h2>
     <form id="newDumpForm" class="field">
       <label for="newTitle">Title</label>
@@ -578,6 +619,7 @@
       <input id="newAudio" placeholder="dumps/latest.wav" />
       <button class="btn primary" type="submit">Create dump</button>
     </form>
+
     <h2>Providers</h2>
     <form id="providerForm" class="field">
       <label for="provName">Name</label>
@@ -602,10 +644,7 @@
   <main class="app-main">
     <section class="mascot-panel" aria-labelledby="mascotHeading">
       <div class="mascot" id="mascot" data-state="idle">
-        <div class="body"></div>
-        <div class="eye left"><div class="pupil"></div></div>
-        <div class="eye right"><div class="pupil"></div></div>
-        <div class="mouth"></div>
+        <img id="mascotImg" src="/api/mascot/idle.png" alt="Dumpi the mascot" />
       </div>
       <div class="mascot-meta">
         <h1 id="mascotHeading">Hi, I'm Dumpi 👋</h1>
@@ -649,6 +688,9 @@
       selectedId: null,
       recording: false,
       busSource: null,
+      profile: null,
+      achievements: null,
+      mascotState: null,
     };
 
     const API = {
@@ -662,6 +704,9 @@
       search: "/api/search",
       providers: "/api/providers",
       events: "/api/events",
+      profile: "/api/profile",
+      achievements: "/api/achievements",
+      mascot: (s) => `/api/mascot/${s}.png`,
     };
 
     async function api(path, opts = {}) {
@@ -681,9 +726,14 @@
       const mascot = $("#mascot");
       const chip = $("#statusChip");
       const line = $("#mascotLine");
+      const img = $("#mascotImg");
       mascot.dataset.state = s;
       chip.dataset.state = s;
       chip.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+      if (img && state.mascotState !== s) {
+        img.src = API.mascot(s);
+        state.mascotState = s;
+      }
       const lines = {
         idle:      "Tap record to dump your next messy idea.",
         listening: "I'm listening… keep going.",
@@ -854,6 +904,148 @@
         row.querySelector(".detail").textContent = h.detail || "";
         list.appendChild(row);
       }
+      return data;
+    }
+
+    async function loadProfile() {
+      try {
+        const p = await api(API.profile);
+        state.profile = p;
+        renderProfile();
+      } catch (e) {
+        showToast(`Profile load failed: ${e.message}`);
+      }
+    }
+
+    function renderProfile() {
+      const p = state.profile;
+      if (!p) return;
+      const pill = $("#levelPill");
+      if (pill) pill.textContent = `Lvl ${p.level} · ${p.xp} XP`;
+      const name = $("#profileName");
+      if (name) name.textContent = p.name || "(unnamed)";
+      const xpInLevel = p.xp % 100;
+      const fill = $("#xpFill");
+      if (fill) fill.style.width = `${xpInLevel}%`;
+      const info = $("#xpInfo");
+      if (info) {
+        info.textContent = `Lvl ${p.level} · ${p.xp} XP · ${p.xp_to_next_level} to next · 🔥 ${p.streak_days}d streak`;
+      }
+    }
+
+    async function loadAchievements() {
+      try {
+        const data = await api(API.achievements);
+        state.achievements = data;
+        renderAchievements();
+      } catch (e) {
+        showToast(`Achievements load failed: ${e.message}`);
+      }
+    }
+
+    function renderAchievements() {
+      const list = $("#achList");
+      if (!list) return;
+      const data = state.achievements;
+      list.innerHTML = "";
+      if (!data || !data.items || data.items.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No achievements configured yet.";
+        list.appendChild(empty);
+        return;
+      }
+      for (const a of data.items) {
+        const row = document.createElement("div");
+        const unlocked = a.unlocked_at != null;
+        row.className = "ach-row" + (unlocked ? "" : " is-locked");
+        if (a._justUnlocked) row.classList.add("is-new");
+        row.innerHTML = `<div class="ach-title"></div><div class="ach-desc"></div>`;
+        row.querySelector(".ach-title").textContent = unlocked ? `🏆 ${a.title}` : `🔒 ${a.title}`;
+        row.querySelector(".ach-desc").textContent = a.description || "";
+        list.appendChild(row);
+      }
+      const summary = document.createElement("div");
+      summary.className = "xp-info";
+      summary.textContent = `${data.unlocked_count} / ${data.total} unlocked`;
+      list.appendChild(summary);
+    }
+
+    async function loadDefaultLlmOptions() {
+      // Filter LLM kind from /api/providers configs; fall back to all enabled
+      // providers if no kind="llm" rows exist (the health endpoint has no kind).
+      const select = $("#defaultLlm");
+      if (!select) return;
+      select.innerHTML = "";
+      const envOpt = document.createElement("option");
+      envOpt.value = "__env__";
+      envOpt.textContent = "Use env override (VIBEDUMP_LLM_PROVIDER)";
+      select.appendChild(envOpt);
+      let llmNames = [];
+      try {
+        const data = await api(API.providers);
+        const configs = (data.configs || []).filter((c) => c.enabled);
+        const llmConfigs = configs.filter((c) => c.kind === "llm");
+        llmNames = llmConfigs.length > 0
+          ? llmConfigs.map((c) => c.name)
+          : configs.map((c) => c.name);
+        for (const name of llmNames) {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          select.appendChild(opt);
+        }
+        if (llmNames.length === 0) {
+          const none = document.createElement("option");
+          none.disabled = true;
+          none.textContent = "(no providers configured)";
+          select.appendChild(none);
+        }
+      } catch (e) {
+        showToast(`LLM options load failed: ${e.message}`);
+      }
+      const saved = localStorage.getItem("vibedump.defaultLlm");
+      if (saved && (saved === "__env__" || llmNames.includes(saved))) {
+        select.value = saved;
+      }
+    }
+
+    async function saveDefaultLlm() {
+      const select = $("#defaultLlm");
+      if (!select) return;
+      const value = select.value;
+      try {
+        if (value && value !== "__env__") {
+          await api(API.providers, {
+            method: "POST",
+            body: JSON.stringify({ name: value, kind: "llm", enabled: true, config: {} }),
+          });
+        }
+        localStorage.setItem("vibedump.defaultLlm", value || "__env__");
+        showToast(value && value !== "__env__" ? `Default LLM set to ${value}` : "Default LLM set to env override");
+        loadProviders();
+      } catch (e) {
+        showToast(`Save failed: ${e.message}`);
+      }
+    }
+
+    async function saveProfileName() {
+      const input = $("#newProfileName");
+      if (!input) return;
+      const name = input.value.trim();
+      if (!name) return showToast("Name cannot be blank");
+      try {
+        const updated = await api(API.profile, {
+          method: "PATCH",
+          body: JSON.stringify({ name }),
+        });
+        state.profile = updated;
+        renderProfile();
+        input.value = "";
+        showToast("Name updated");
+      } catch (e) {
+        showToast(`Update failed: ${e.message}`);
+      }
     }
 
     async function runSearch(q) {
@@ -909,6 +1101,33 @@
         showToast(`Provider ${data.name} saved`);
         loadProviders();
       });
+      es.addEventListener("profile.xp", (e) => {
+        const data = JSON.parse(e.data).payload;
+        if (state.profile) {
+          state.profile = {
+            ...state.profile,
+            xp: data.xp ?? state.profile.xp,
+            level: data.level ?? state.profile.level,
+            xp_to_next_level: data.xp_to_next_level ?? state.profile.xp_to_next_level,
+          };
+          renderProfile();
+        }
+        if (data.delta) showToast(`+${data.delta} XP`);
+      });
+      es.addEventListener("profile.level_up", (e) => {
+        const data = JSON.parse(e.data).payload;
+        if (state.profile) {
+          state.profile = { ...state.profile, level: data.level ?? state.profile.level };
+          renderProfile();
+        }
+        setMascotState("level_up");
+        showToast("Level up! 🎉");
+      });
+      es.addEventListener("achievement.unlocked", (e) => {
+        const data = JSON.parse(e.data).payload;
+        showToast(`🏆 ${data.title || data.key} unlocked`);
+        loadAchievements();
+      });
       es.onerror = () => { setTimeout(connectSSE, 3000); };
     }
 
@@ -961,6 +1180,12 @@
         } catch (err) { showToast(`Save failed: ${err.message}`); }
       });
 
+      $("#saveProfileName")?.addEventListener("click", saveProfileName);
+      $("#newProfileName")?.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); saveProfileName(); }
+      });
+      $("#saveDefaultLlm")?.addEventListener("click", saveDefaultLlm);
+
       const recBtn = $("#recordBtn");
       recBtn.addEventListener("click", async () => {
         if (!state.selectedId) return showToast("Select or create a dump first");
@@ -977,8 +1202,18 @@
     async function init() {
       bindEvents();
       try {
+        // Preload the idle mascot PNG before the first render so we never
+        // flash a missing-image icon on slow networks.
+        const idleImg = $("#mascotImg");
+        if (idleImg) idleImg.src = API.mascot("idle");
+        state.mascotState = "idle";
         await loadDumps();
-        await loadProviders();
+        await Promise.all([
+          loadProviders(),
+          loadProfile(),
+          loadAchievements(),
+          loadDefaultLlmOptions(),
+        ]);
         setMascotState("idle");
         connectSSE();
       } catch (e) {

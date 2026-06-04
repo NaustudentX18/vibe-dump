@@ -30,7 +30,7 @@ from .active_listener import (
     parse_listener_response,
     render_listener_prompt,
 )
-from .database import Database, TurnRecord
+from .database import Database, ProfileRecord, TurnRecord
 from .events import EventBus
 from .provider_selection import select_llm_provider
 from .providers import ProviderRegistry, fake_registry
@@ -108,6 +108,8 @@ class AgentPipeline:
         blueprint = blueprint_template(title)
         blueprint_id = self.db.add_blueprint(dump_id, blueprint)
         self.memory.remember(dump_id, "blueprint", blueprint_id, blueprint)
+        self._grant_xp_with_event(20, "blueprint_generated")
+        self._unlock("first_blueprint")
         return PipelineResult(dump_id=dump_id, transcript=transcript, blueprint=blueprint)
 
     # ------------------------------------------------------------------
@@ -130,6 +132,8 @@ class AgentPipeline:
             turn_id = self.db.add_turn(dump_id, "user", transcript, audio_path=audio_path)
             self.memory.remember(dump_id, "turn", turn_id, transcript)
         self._set_status(dump_id, _STATUS_LISTENING)
+        self._grant_xp_with_event(5, "start_dump")
+        self._unlock("first_dump")
         return dump_id
 
     def add_user_turn(self, dump_id: int, text: str) -> None:
@@ -180,6 +184,8 @@ class AgentPipeline:
         if decision.action == ListenerAction.FINALIZE:
             blueprint = self._compile_blueprint(dump_id, llm)
             self._set_status(dump_id, _STATUS_READY)
+            self._grant_xp_with_event(20, "blueprint_finalize")
+            self._unlock("first_blueprint")
             if self.bus is not None:
                 latest = self.db.get_latest_blueprint(dump_id)
                 self.bus.publish(
@@ -233,6 +239,55 @@ class AgentPipeline:
         self.db.update_dump_status(dump_id, status)
         if self.bus is not None:
             self.bus.publish("dump.status", {"dump_id": dump_id, "status": status})
+
+    def _grant_xp_with_event(self, amount: int, reason: str) -> ProfileRecord | None:
+        """Grant XP, publish events, and unlock level/xp milestones.
+
+        Returns the updated profile, or None if amount is non-positive.
+        Emits ``profile.xp`` on every grant and ``profile.level_up`` only
+        when the level actually changes. Milestone unlocks (``level_2``,
+        ``xp_100``, ``streak_3``) are checked and emitted via ``_unlock``.
+        """
+        if amount <= 0:
+            return None
+        before = self.db.get_profile()
+        profile = self.db.grant_xp(amount)
+        if self.bus is not None:
+            self.bus.publish(
+                "profile.xp",
+                {
+                    "xp": profile.xp,
+                    "level": profile.level,
+                    "delta": amount,
+                    "reason": reason,
+                },
+            )
+        if profile.level > before.level and self.bus is not None:
+            self.bus.publish("profile.level_up", {"level": profile.level})
+        if profile.level >= 2:
+            self._unlock("level_2")
+        if profile.xp >= 100:
+            self._unlock("xp_100")
+        if profile.streak_days >= 3:
+            self._unlock("streak_3")
+        return profile
+
+    def _unlock(self, key: str) -> None:
+        """Unlock an achievement and publish on first unlock.
+
+        Idempotent: already-unlocked or unknown keys are silent no-ops.
+        """
+        if not self.db.unlock_achievement(key):
+            return
+        title = next(
+            (a.title for a in self.db.list_achievements() if a.key == key),
+            key,
+        )
+        if self.bus is not None:
+            self.bus.publish(
+                "achievement.unlocked",
+                {"key": key, "title": title},
+            )
 
 
 # Backward-compat alias. The class was previously named FakeAgentPipeline

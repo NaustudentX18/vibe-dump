@@ -11,19 +11,22 @@ not installed so the package still imports cleanly for the database / RAG tests.
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Iterator
 
 from .agent_pipeline import AgentPipeline
 from .database import (
+    AchievementRecord,
     BlueprintRecord,
     Database,
     DumpRecord,
+    ProfileRecord,
     ProviderConfigRecord,
     TurnRecord,
 )
 from .events import EventBus
+from .mascot_renderer import MascotRenderer
 from .providers import build_registry, fake_registry
 from .ragmemory import RagMemory
 from .state import DeviceState
@@ -43,6 +46,7 @@ class AppState:
     pipeline: AgentPipeline
     memory: RagMemory
     device_state: DeviceState = DeviceState.IDLE
+    mascot_renderer: MascotRenderer = field(default_factory=MascotRenderer)
 
     def close(self) -> None:
         self.db.close()
@@ -107,10 +111,29 @@ def _provider_to_dict(config: ProviderConfigRecord) -> dict[str, Any]:
     }
 
 
+def _achievement_to_dict(achievement: AchievementRecord) -> dict[str, Any]:
+    return {
+        "key": achievement.key,
+        "title": achievement.title,
+        "description": achievement.description,
+        "unlocked_at": achievement.unlocked_at,
+    }
+
+
+def _profile_to_dict(profile: ProfileRecord) -> dict[str, Any]:
+    return {
+        "name": profile.name,
+        "xp": profile.xp,
+        "level": profile.level,
+        "streak_days": profile.streak_days,
+        "xp_to_next_level": 100 - (profile.xp % 100),
+    }
+
+
 def create_app(state: AppState | None = None) -> Any:
     """Create the FastAPI app, wiring routes to the provided state."""
     try:
-        from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+        from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
         from fastapi.responses import HTMLResponse, StreamingResponse
         from pydantic import BaseModel, Field
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dep path
@@ -136,6 +159,10 @@ def create_app(state: AppState | None = None) -> Any:
         kind: str = Field(min_length=1, max_length=20)
         enabled: bool = True
         config: dict[str, Any] = Field(default_factory=dict)
+
+    class ProfilePatchRequest(BaseModel):
+        name: str | None = Field(default=None, max_length=80)
+        xp_delta: int | None = None
 
     def get_state(request: Request) -> AppState:
         return request.app.state.vibedump  # type: ignore[no-any-return]
@@ -297,6 +324,78 @@ def create_app(state: AppState | None = None) -> Any:
                 yield _format_sse(event.event_type, event.payload, event.created_at)
 
         return StreamingResponse(stream(), media_type="text/event-stream")
+
+    # ------------------------------------------------------------------
+    # M5: Achievements, profile, and mascot PNG routes
+    # ------------------------------------------------------------------
+
+    MASCOT_STATES: tuple[str, ...] = (
+        "idle",
+        "listening",
+        "thinking",
+        "speaking",
+        "error",
+        "level_up",
+        "sleeping",
+        "draft",
+        "ready",
+    )
+    _FALLBACK_PNG = (
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        b"\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4"
+        b"\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe"
+        b"A\x9c\x82\xc8\x00\x00\x00\x00IEND\xaeB`\x82"
+    )
+
+    @app.get("/api/achievements")
+    def list_achievements_route(st: State) -> dict[str, Any]:  # type: ignore[valid-type]
+        achievements = st.db.list_achievements()
+        unlocked = sum(1 for a in achievements if a.unlocked_at is not None)
+        return {
+            "items": [_achievement_to_dict(a) for a in achievements],
+            "unlocked_count": unlocked,
+            "total": len(achievements),
+        }
+
+    @app.get("/api/profile")
+    def get_profile_route(st: State) -> dict[str, Any]:  # type: ignore[valid-type]
+        return _profile_to_dict(st.db.get_profile())
+
+    @app.patch("/api/profile")
+    def patch_profile_route(
+        body: ProfilePatchRequest,
+        st: State,  # type: ignore[valid-type]
+    ) -> dict[str, Any]:
+        if body.xp_delta is not None and body.xp_delta < 0:
+            raise HTTPException(status_code=400, detail="xp_delta must be non-negative")
+        if body.name is not None and not body.name.strip():
+            raise HTTPException(status_code=400, detail="name cannot be blank")
+        if body.name is not None:
+            st.db.update_profile_name(body.name)
+        if body.xp_delta is not None and body.xp_delta > 0:
+            st.db.grant_xp(body.xp_delta)
+        return _profile_to_dict(st.db.get_profile())
+
+    @app.get("/api/mascot/{state}.png")
+    def mascot_png_route(state: str, st: State) -> Response:  # type: ignore[valid-type]
+        normalized = state.strip().lower()
+        if normalized not in MASCOT_STATES:
+            raise HTTPException(status_code=404, detail=f"unknown mascot state: {state}")
+        frame = st.mascot_renderer.render(normalized)
+        if not frame.png_bytes:
+            return Response(
+                content=_FALLBACK_PNG,
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "X-Mascot-Mode": "degraded",
+                },
+            )
+        return Response(
+            content=frame.png_bytes,
+            media_type="image/png",
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
