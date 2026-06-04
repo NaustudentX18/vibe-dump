@@ -39,7 +39,10 @@ def test_default_registry_is_fake(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client_with_registry(fake_registry())
     body = client.get("/api/providers").json()
     names = {h["name"] for h in body["health"]}
-    assert names == {"fake"}
+    # fake_registry now also includes the fake variants of the real
+    # audio adapters (WhisperSTT.fake() / PiperTTS.fake()) so the
+    # dashboard shows every selectable provider, even in zero-config.
+    assert names == {"fake", "whisper_fake", "piper_fake"}
 
 
 def test_real_registry_routes_through_app(monkeypatch: pytest.MonkeyPatch) -> None:

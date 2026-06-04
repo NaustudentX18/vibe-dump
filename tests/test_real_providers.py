@@ -269,6 +269,11 @@ def test_has_any_real_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_fake_registry_unchanged() -> None:
-    """Regression: fake registry must still be the zero-config default."""
+    """Regression: fake registry must still be the zero-config default.
+
+    As of M7 Phase 3 the registry also exposes the fake variants of the
+    real audio adapters (``whisper_fake`` / ``piper_fake``) so the
+    dashboard / tests can target them by name.
+    """
     registry = fake_registry()
-    assert {p.name for p in registry.health()} == {"fake"}
+    assert {p.name for p in registry.health()} == {"fake", "whisper_fake", "piper_fake"}

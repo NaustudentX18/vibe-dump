@@ -456,6 +456,19 @@
       0%, 100% { transform: scale(1); }
       50% { transform: scale(1.08); }
     }
+    .action-bar #pttHoldBtn {
+      background: linear-gradient(135deg, rgba(74, 214, 255, 0.18), rgba(160, 124, 255, 0.18));
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+    .action-bar #pttHoldBtn.is-ptt-active {
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-violet));
+      color: #0a0c14;
+      border-color: var(--accent-cyan);
+    }
 
     /* Toast / SSE log */
     .event-log {
@@ -672,6 +685,7 @@
   <div class="action-bar" role="toolbar" aria-label="Quick actions">
     <button class="btn" id="navSearchBtn" aria-label="Search">🔍</button>
     <button class="record-btn" id="recordBtn" aria-label="Record">🎙</button>
+    <button class="btn" id="pttHoldBtn" aria-label="Hold to talk" aria-pressed="false">🎙 Hold to talk</button>
     <button class="btn" id="navSettingsBtn" aria-label="Settings">⚙️</button>
   </div>
 
@@ -691,6 +705,8 @@
       profile: null,
       achievements: null,
       mascotState: null,
+      pttJobId: null,
+      pttPollTimer: null,
     };
 
     const API = {
@@ -707,6 +723,12 @@
       profile: "/api/profile",
       achievements: "/api/achievements",
       mascot: (s) => `/api/mascot/${s}.png`,
+      hardwareStatus: "/api/hardware/status",
+      hardwareDisplay: "/api/hardware/display",
+      hardwarePisugar: "/api/hardware/pisugar",
+      pttStart: "/api/hardware/ptt/start",
+      pttCancel: "/api/hardware/ptt/cancel",
+      pttJob: (id) => `/api/hardware/ptt/${id}`,
     };
 
     async function api(path, opts = {}) {
@@ -1128,7 +1150,64 @@
         showToast(`🏆 ${data.title || data.key} unlocked`);
         loadAchievements();
       });
+      es.addEventListener("ptt.completed", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        const transcript = (data.transcript || "").toString().trim();
+        const status = data.status || "done";
+        if (status === "error") {
+          showToast(`🎙 PTT failed: ${data.error || "unknown error"}`);
+        } else if (transcript) {
+          showToast(`🎙 "${transcript}"`);
+        } else {
+          showToast("🎙 PTT captured nothing");
+        }
+        stopPttPolling();
+        state.pttJobId = null;
+        const pttBtn = $("#pttHoldBtn");
+        if (pttBtn) {
+          pttBtn.classList.remove("is-ptt-active");
+          pttBtn.setAttribute("aria-pressed", "false");
+        }
+        // Refresh the active dump's transcript so the new turn shows up.
+        if (state.selectedId) selectDump(state.selectedId);
+      });
       es.onerror = () => { setTimeout(connectSSE, 3000); };
+    }
+
+    function stopPttPolling() {
+      if (state.pttPollTimer) {
+        clearInterval(state.pttPollTimer);
+        state.pttPollTimer = null;
+      }
+    }
+
+    function startPttPolling(jobId) {
+      stopPttPolling();
+      state.pttPollTimer = setInterval(async () => {
+        try {
+          const job = await api(API.pttJob(jobId));
+          if (job.status === "done" || job.status === "error" || job.status === "cancelled") {
+            stopPttPolling();
+            const transcript = (job.transcript || "").toString().trim();
+            if (job.status === "error") {
+              showToast(`🎙 PTT failed: ${job.error || "unknown error"}`);
+            } else if (transcript) {
+              showToast(`🎙 "${transcript}"`);
+            } else {
+              showToast("🎙 PTT captured nothing");
+            }
+            state.pttJobId = null;
+            const pttBtn = $("#pttHoldBtn");
+            if (pttBtn) {
+              pttBtn.classList.remove("is-ptt-active");
+              pttBtn.setAttribute("aria-pressed", "false");
+            }
+            if (state.selectedId) selectDump(state.selectedId);
+          }
+        } catch (e) {
+          stopPttPolling();
+        }
+      }, 500);
     }
 
     function bindEvents() {
@@ -1197,6 +1276,60 @@
           setMascotState(status);
         } catch (err) { showToast(`Status update failed: ${err.message}`); }
       });
+
+      bindPttButton();
+    }
+
+    function bindPttButton() {
+      const btn = $("#pttHoldBtn");
+      if (!btn) return;
+      const onStart = async (ev) => {
+        ev.preventDefault();
+        if (!state.selectedId) {
+          showToast("Select or create a dump first");
+          return;
+        }
+        if (state.pttJobId) return; // already recording
+        btn.classList.add("is-ptt-active");
+        btn.setAttribute("aria-pressed", "true");
+        try {
+          const res = await api(API.pttStart, {
+            method: "POST",
+            body: JSON.stringify({ dump_id: state.selectedId, duration_s: 5.0 }),
+          });
+          state.pttJobId = res.job_id;
+          startPttPolling(res.job_id);
+        } catch (err) {
+          btn.classList.remove("is-ptt-active");
+          btn.setAttribute("aria-pressed", "false");
+          showToast(`🎙 PTT start failed: ${err.message}`);
+        }
+      };
+      const onEnd = async (ev) => {
+        ev.preventDefault();
+        if (!state.pttJobId) {
+          btn.classList.remove("is-ptt-active");
+          btn.setAttribute("aria-pressed", "false");
+          return;
+        }
+        try {
+          await api(API.pttCancel, {
+            method: "POST",
+            body: JSON.stringify({ job_id: state.pttJobId }),
+          });
+        } catch (err) {
+          showToast(`🎙 PTT cancel failed: ${err.message}`);
+        }
+      };
+      btn.addEventListener("mousedown", onStart);
+      btn.addEventListener("touchstart", onStart, { passive: false });
+      btn.addEventListener("mouseup", onEnd);
+      btn.addEventListener("mouseleave", onEnd);
+      btn.addEventListener("touchend", onEnd);
+      btn.addEventListener("touchcancel", onEnd);
+      // Suppress the synthetic click that browsers fire after a touch
+      // sequence so the button doesn't toggle twice.
+      btn.addEventListener("click", (ev) => ev.preventDefault());
     }
 
     async function init() {

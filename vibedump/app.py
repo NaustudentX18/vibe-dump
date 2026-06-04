@@ -9,11 +9,15 @@ FastAPI is an optional dependency. The factory raises a clear error if it is
 not installed so the package still imports cleanly for the database / RAG tests.
 """
 
+import base64
 import json
 import os
+import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Iterator
+from uuid import uuid4
 
 from .agent_pipeline import AgentPipeline
 from .database import (
@@ -26,6 +30,23 @@ from .database import (
     TurnRecord,
 )
 from .events import EventBus
+from .integrations.audio_capture import (
+    AudioCapture,
+    AudioCaptureNotAvailable,
+    make_audio_capture,
+)
+from .integrations.pisugar import (
+    BatteryReading,
+    PiSugarBridge,
+    PiSugarMonitor,
+    PiSugarNotAvailable,
+    make_pisugar,
+)
+from .integrations.whisplay import (
+    WhisplayBridge,
+    WhisplayNotAvailable,
+    make_whisplay,
+)
 from .mascot_renderer import MascotRenderer
 from .providers import build_registry, fake_registry
 from .ragmemory import RagMemory
@@ -35,6 +56,30 @@ STATIC_DIR = Path(__file__).parent / "static"
 DASHBOARD_FILE = STATIC_DIR / "dashboard.html"
 
 DEFAULT_API_PREFIX = "/api"
+
+# M7 push-to-talk: write WAVs here so the STT layer can find them.
+PTT_TMP_DIR = Path(os.environ.get("VIBEDUMP_PTT_DIR", "/tmp"))
+
+
+@dataclass(slots=True)
+class PttJob:
+    """In-process tracker for a single push-to-talk recording.
+
+    Statuses:
+    * ``"recording"``    - audio capture in flight
+    * ``"transcribing"`` - WAV recorded, STT call running
+    * ``"done"``         - transcript persisted as a user turn
+    * ``"cancelled"``    - ``/api/hardware/ptt/cancel`` fired
+    * ``"error"``        - any exception during record/transcribe/add_turn
+    """
+
+    job_id: str
+    dump_id: int
+    wav_path: str
+    started_at: str
+    status: str
+    transcript: str | None = None
+    error: str | None = None
 
 
 @dataclass(slots=True)
@@ -47,8 +92,43 @@ class AppState:
     memory: RagMemory
     device_state: DeviceState = DeviceState.IDLE
     mascot_renderer: MascotRenderer = field(default_factory=MascotRenderer)
+    # M7 hardware bridges. ``None`` means the integration is unavailable on
+    # this host (driver missing, I2C bus absent, no microphone, etc.).
+    whisplay: WhisplayBridge | None = None
+    pisugar: PiSugarBridge | None = None
+    pisugar_monitor: PiSugarMonitor | None = None
+    audio_capture: AudioCapture | None = None
+    # STT provider name used by the PTT route. Defaults to ``"fake"`` so the
+    # test suite (and zero-config dev) can run without a cloud STT key.
+    ptt_stt_provider: str = "fake"
+    # In-process PTT job registry. Keyed by ``uuid4().hex``.
+    ptt_jobs: dict[str, PttJob] = field(default_factory=dict)
+    ptt_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def close(self) -> None:
+        if self.pisugar_monitor is not None:
+            try:
+                self.pisugar_monitor.stop()
+            except Exception:
+                pass
+        # Hardware bridges expose ``close`` defensively; the new
+        # ``AudioCapture`` Protocol does not require it. ``getattr`` keeps
+        # this code working for both the Whisplay/PiSugar bridges and the
+        # arecord-backed AudioCapture.
+        for bridge in (self.whisplay, self.pisugar):
+            if bridge is None:
+                continue
+            close = getattr(bridge, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    pass
+        if self.audio_capture is not None:
+            try:
+                self.audio_capture.cancel()
+            except Exception:
+                pass
         self.db.close()
 
 
@@ -60,12 +140,29 @@ def _create_default_state() -> AppState:
     # VIBEDUMP_REGISTRY=real wires the production provider set (build_registry).
     registry_kind = os.environ.get("VIBEDUMP_REGISTRY", "fake").lower()
     registry = build_registry() if registry_kind == "real" else fake_registry()
-    return AppState(
+    state = AppState(
         db=db,
         bus=bus,
         pipeline=AgentPipeline(db, registry=registry, bus=bus),
         memory=RagMemory(db),
     )
+    # M7 hardware. Each ``make_*`` is best-effort: missing drivers fall back
+    # to fake, missing fake constructors raise. We swallow WhisplayNotAvailable
+    # / PiSugarNotAvailable / AudioCaptureNotAvailable and leave the field
+    # ``None`` so the app starts even on a stock dev box.
+    try:
+        state.whisplay = make_whisplay(prefer="auto")
+    except WhisplayNotAvailable:
+        state.whisplay = None
+    try:
+        state.pisugar = make_pisugar(prefer="auto")
+    except PiSugarNotAvailable:
+        state.pisugar = None
+    try:
+        state.audio_capture = make_audio_capture(prefer="auto")
+    except AudioCaptureNotAvailable:
+        state.audio_capture = None
+    return state
 
 
 def _dump_to_dict(dump: DumpRecord) -> dict[str, Any]:
@@ -130,6 +227,18 @@ def _profile_to_dict(profile: ProfileRecord) -> dict[str, Any]:
     }
 
 
+def _battery_to_dict(reading: BatteryReading) -> dict[str, Any]:
+    return {
+        "battery_percent": reading.battery_percent,
+        "voltage_v": reading.voltage_v,
+        "current_ma": reading.current_ma,
+        "temperature_c": reading.temperature_c,
+        "is_charging": reading.is_charging,
+        "is_powered": reading.is_powered,
+        "timestamp": reading.timestamp,
+    }
+
+
 def create_app(state: AppState | None = None) -> Any:
     """Create the FastAPI app, wiring routes to the provided state."""
     try:
@@ -163,6 +272,18 @@ def create_app(state: AppState | None = None) -> Any:
     class ProfilePatchRequest(BaseModel):
         name: str | None = Field(default=None, max_length=80)
         xp_delta: int | None = None
+
+    class DisplayFrameRequest(BaseModel):
+        png_base64: str = Field(min_length=1, max_length=200_000)
+        width: int = Field(default=240, ge=1, le=480)
+        height: int = Field(default=280, ge=1, le=480)
+
+    class PttStartRequest(BaseModel):
+        dump_id: int = Field(ge=1)
+        duration_s: float = Field(default=5.0, ge=0.5, le=60.0)
+
+    class PttCancelRequest(BaseModel):
+        job_id: str = Field(min_length=1, max_length=64)
 
     def get_state(request: Request) -> AppState:
         return request.app.state.vibedump  # type: ignore[no-any-return]
@@ -402,6 +523,235 @@ def create_app(state: AppState | None = None) -> Any:
         if not DASHBOARD_FILE.exists():
             return "<h1>💩 Vibe-Dump</h1><p>Dashboard missing.</p>"
         return DASHBOARD_FILE.read_text(encoding="utf-8")
+
+    # ------------------------------------------------------------------
+    # M7: Hardware HTTP routes (Whisplay display, PiSugar telemetry,
+    # push-to-talk audio capture + STT).
+    # ------------------------------------------------------------------
+
+    def _whisplay_buttons_pending() -> list[str]:
+        """Drain the Whisplay's button queue; returns [] if no bridge."""
+        if app_state.whisplay is None:
+            return []
+        try:
+            pending = app_state.whisplay.read_buttons()
+        except Exception:
+            return []
+        return sorted(pending)
+
+    def _ptt_worker(
+        job_id: str,
+        dump_id: int,
+        duration_s: float,
+        wav_path: str,
+    ) -> None:
+        """Background thread body for a single push-to-talk session.
+
+        Sequence: record -> transcribe -> add_user_turn -> publish event.
+        Every error path sets ``status="error"`` and stashes the message in
+        ``transcript`` so the dashboard can show *something* meaningful.
+        """
+        with app_state.ptt_lock:
+            job = app_state.ptt_jobs.get(job_id)
+        if job is None:
+            return
+
+        try:
+            if app_state.audio_capture is not None:
+                try:
+                    app_state.audio_capture.record(duration_s, wav_path)
+                except Exception as exc:
+                    job.status = "error"
+                    job.error = f"record failed: {exc}"
+                    job.transcript = f"[record failed: {exc}]"
+                    app_state.bus.publish(
+                        "ptt.completed",
+                        {
+                            "job_id": job_id,
+                            "dump_id": dump_id,
+                            "wav_path": wav_path,
+                            "status": "error",
+                            "error": job.error,
+                        },
+                    )
+                    return
+            else:
+                # No capture backend: write a silent WAV so STT still works
+                # in dev / CI.
+                from vibedump.integrations.audio_capture import _write_silent_wav
+
+                _write_silent_wav(wav_path, duration_s)
+
+            with app_state.ptt_lock:
+                if job.status == "cancelled":
+                    return
+                job.status = "transcribing"
+
+            provider_name = app_state.ptt_stt_provider
+            try:
+                stt = app_state.pipeline.registry.stt[provider_name]
+            except KeyError:
+                stt = next(iter(app_state.pipeline.registry.stt.values()), None)
+                if stt is None:
+                    raise RuntimeError("no STT provider configured")
+            transcript = stt.transcribe(wav_path)
+
+            try:
+                app_state.pipeline.add_user_turn(dump_id, transcript)
+            except Exception as exc:
+                job.status = "error"
+                job.error = f"add_user_turn failed: {exc}"
+                job.transcript = transcript
+                app_state.bus.publish(
+                    "ptt.completed",
+                    {
+                        "job_id": job_id,
+                        "dump_id": dump_id,
+                        "wav_path": wav_path,
+                        "transcript": transcript,
+                        "status": "error",
+                        "error": job.error,
+                    },
+                )
+                return
+
+            job.status = "done"
+            job.transcript = transcript
+            app_state.bus.publish(
+                "ptt.completed",
+                {
+                    "job_id": job_id,
+                    "dump_id": dump_id,
+                    "wav_path": wav_path,
+                    "transcript": transcript,
+                },
+            )
+        except Exception as exc:
+            job.status = "error"
+            job.error = f"worker crashed: {exc}"
+            job.transcript = job.transcript or f"[worker crashed: {exc}]"
+            app_state.bus.publish(
+                "ptt.completed",
+                {
+                    "job_id": job_id,
+                    "dump_id": dump_id,
+                    "wav_path": wav_path,
+                    "status": "error",
+                    "error": job.error,
+                },
+            )
+
+    def _ptt_to_dict(job: PttJob) -> dict[str, Any]:
+        return {
+            "job_id": job.job_id,
+            "dump_id": job.dump_id,
+            "wav_path": job.wav_path,
+            "started_at": job.started_at,
+            "status": job.status,
+            "transcript": job.transcript,
+            "error": job.error,
+        }
+
+    @app.get("/api/hardware/status")
+    def hardware_status(st: State) -> dict[str, Any]:  # type: ignore[valid-type]
+        pisugar_payload: dict[str, Any] | None
+        if st.pisugar is None:
+            pisugar_payload = None
+        else:
+            try:
+                pisugar_payload = _battery_to_dict(st.pisugar.read())
+            except Exception:
+                pisugar_payload = None
+        return {
+            "whisplay": st.whisplay is not None,
+            "pisugar": pisugar_payload,
+            "audio_capture": st.audio_capture is not None,
+            "buttons_pending": _whisplay_buttons_pending(),
+        }
+
+    @app.post("/api/hardware/display")
+    def hardware_display(
+        body: DisplayFrameRequest,
+        st: State,  # type: ignore[valid-type]
+    ) -> dict[str, Any]:
+        if st.whisplay is None:
+            raise HTTPException(status_code=503, detail="whisplay not available")
+        try:
+            png_bytes = base64.b64decode(body.png_base64, validate=True)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"invalid base64: {exc}") from exc
+        if not png_bytes:
+            raise HTTPException(status_code=400, detail="png_base64 decoded to empty bytes")
+        st.whisplay.display_frame(png_bytes)
+        return {"ok": True, "bytes_sent": len(png_bytes), "width": body.width, "height": body.height}
+
+    @app.get("/api/hardware/pisugar")
+    def hardware_pisugar(st: State) -> dict[str, Any]:  # type: ignore[valid-type]
+        if st.pisugar is None:
+            raise HTTPException(status_code=503, detail="pisugar not available")
+        reading = st.pisugar.read()
+        return _battery_to_dict(reading)
+
+    @app.post("/api/hardware/ptt/start", status_code=status.HTTP_202_ACCEPTED)
+    def hardware_ptt_start(
+        body: PttStartRequest,
+        st: State,  # type: ignore[valid-type]
+    ) -> dict[str, Any]:
+        if st.audio_capture is None:
+            raise HTTPException(status_code=503, detail="audio capture not available")
+        # We do NOT validate the dump id here on purpose: the background
+        # worker is allowed to fail with ``status="error"`` if the dump
+        # was deleted between the start request and the recording
+        # finishing. The dashboard polls for status and surfaces the
+        # error toast, so the failure is observable end-to-end.
+        job_id = uuid4().hex
+        PTT_TMP_DIR.mkdir(parents=True, exist_ok=True)
+        wav_path = str(PTT_TMP_DIR / f"vibedump_ptt_{job_id}.wav")
+        job = PttJob(
+            job_id=job_id,
+            dump_id=body.dump_id,
+            wav_path=wav_path,
+            started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            status="recording",
+        )
+        with st.ptt_lock:
+            st.ptt_jobs[job_id] = job
+        thread = threading.Thread(
+            target=_ptt_worker,
+            args=(job_id, body.dump_id, body.duration_s, wav_path),
+            name=f"ptt-{job_id[:8]}",
+            daemon=True,
+        )
+        thread.start()
+        return {"job_id": job_id, "wav_path": wav_path, "dump_id": body.dump_id}
+
+    @app.post("/api/hardware/ptt/cancel")
+    def hardware_ptt_cancel(
+        body: PttCancelRequest,
+        st: State,  # type: ignore[valid-type]
+    ) -> dict[str, Any]:
+        with st.ptt_lock:
+            job = st.ptt_jobs.get(body.job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="ptt job not found")
+        job.status = "cancelled"
+        if st.audio_capture is not None:
+            try:
+                st.audio_capture.cancel()
+            except Exception:
+                pass
+        return {"job_id": body.job_id, "status": "cancelled"}
+
+    @app.get("/api/hardware/ptt/{job_id}")
+    def hardware_ptt_status(
+        job_id: str,
+        st: State,  # type: ignore[valid-type]
+    ) -> dict[str, Any]:
+        with st.ptt_lock:
+            job = st.ptt_jobs.get(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="ptt job not found")
+        return _ptt_to_dict(job)
 
     return app
 

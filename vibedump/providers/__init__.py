@@ -19,8 +19,10 @@ from .minimax import MiniMaxLLM
 from .nvidia import NvidiaLLM
 from .openai_provider import OpenAICompatLLM
 from .openrouter import OpenRouterLLM
+from .piper_tts import PiperTTS
 from .stt import FakeSTT
 from .tts import FakeTTS
+from .whisper_stt import WhisperSTT
 
 
 def fake_registry() -> ProviderRegistry:
@@ -28,6 +30,18 @@ def fake_registry() -> ProviderRegistry:
     registry.stt["fake"] = FakeSTT()
     registry.llm["fake"] = FakeLLM()
     registry.tts["fake"] = FakeTTS()
+
+    # Add the fake variants of the real audio adapters if their helper
+    # modules are importable. Any failure here is non-fatal — fake-only
+    # callers (tests, zero-config dev) still get the original fakes.
+    try:
+        registry.stt["whisper_fake"] = WhisperSTT.fake()
+    except Exception:  # noqa: BLE001 - defensive: any failure means skip
+        pass
+    try:
+        registry.tts["piper_fake"] = PiperTTS.fake()
+    except Exception:  # noqa: BLE001
+        pass
     return registry
 
 
@@ -56,6 +70,23 @@ def build_registry(*, include_local_pc: bool = True) -> ProviderRegistry:
     # If literally nothing configured, fall back to fake so the UI still works.
     if not registry.llm:
         registry.llm["fake"] = FakeLLM()
+
+    # Real audio adapters. Their heavy deps (faster-whisper, piper) are
+    # imported lazily inside the adapter; the constructor always succeeds
+    # so the gate is `.health().ok`, which probes the import without
+    # forcing us to actually load the model.
+    try:
+        whisper = WhisperSTT()
+        if whisper.health().ok:
+            registry.stt["whisper"] = whisper
+    except Exception:  # noqa: BLE001 - defensive: any failure means skip
+        pass
+    try:
+        piper = PiperTTS()
+        if piper.health().ok:
+            registry.tts["piper"] = piper
+    except Exception:  # noqa: BLE001
+        pass
     return registry
 
 
@@ -83,6 +114,8 @@ __all__ = [
     "FakeLLM",
     "FakeSTT",
     "FakeTTS",
+    "WhisperSTT",
+    "PiperTTS",
     "OpenAICompatLLM",
     "OpenRouterLLM",
     "NvidiaLLM",
