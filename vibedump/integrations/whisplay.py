@@ -361,6 +361,22 @@ class RealWhisplayBridge:
 # ---------------------------------------------------------------------------
 
 
+def _spi_path_available() -> bool:
+    """Return True if the Whisplay SPI device node is present.
+
+    Used as a fast pre-flight before the heavier real-bridge probe so
+    that auto-mode on a non-Pi dev box does not pay the cost of trying
+    to import spidev / smbus2 / RPi.GPIO.
+    """
+    from vibedump.integrations.hardware_probe import check_paths
+
+    return all(
+        r.available
+        for r in check_paths()
+        if r.name == "spi"
+    )
+
+
 def make_whisplay(prefer: str = "auto") -> WhisplayBridge:
     """Build a Whisplay bridge.
 
@@ -384,6 +400,11 @@ def make_whisplay(prefer: str = "auto") -> WhisplayBridge:
     if prefer == "real":
         return RealWhisplayBridge()
     if prefer == "auto":
+        # Smoke gate: if the SPI device node is missing, do not even try
+        # the real bridge - the kernel-side spidev driver can't see the
+        # HAT. Saves an import of spidev/smbus2/RPi.GPIO on dev boxes.
+        if not _spi_path_available():
+            return FakeWhisplayBridge()
         try:
             return RealWhisplayBridge()
         except WhisplayNotAvailable:

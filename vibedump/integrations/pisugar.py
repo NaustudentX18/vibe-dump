@@ -234,6 +234,22 @@ class RealPiSugarBridge:
                 self._bus = None
 
 
+def _i2c_path_available() -> bool:
+    """Return True if the PiSugar I2C device node is present.
+
+    Smoke gate: short-circuits the auto factory to fake on dev boxes
+    where /dev/i2c-1 is absent, avoiding the smbus2 import + I2C open
+    attempt on every cold start.
+    """
+    from vibedump.integrations.hardware_probe import check_paths
+
+    return all(
+        r.available
+        for r in check_paths()
+        if r.name == "i2c"
+    )
+
+
 def _try_real_bridge() -> RealPiSugarBridge | None:
     try:
         return RealPiSugarBridge()
@@ -255,6 +271,10 @@ def make_pisugar(prefer: str = "auto") -> PiSugarBridge:
     if prefer == "real":
         return RealPiSugarBridge()
     if prefer == "auto":
+        # Smoke gate: skip the smbus2 import + I2C open when the bus
+        # device node isn't visible to the kernel.
+        if not _i2c_path_available():
+            return FakePiSugarBridge()
         return _try_real_bridge() or FakePiSugarBridge()
     raise ValueError(f"unknown pisugar prefer mode: {prefer!r}")
 
@@ -292,6 +312,9 @@ class PiSugarMonitor:
         if self._thread is not None:
             self._thread.join(timeout=timeout)
             self._thread = None
+
+    def run_forever(self) -> None:
+        pass
 
     def _run(self) -> None:
         while not self._stop_event.is_set():

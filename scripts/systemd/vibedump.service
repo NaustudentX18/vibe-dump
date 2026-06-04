@@ -1,0 +1,19 @@
+[Unit]
+Description=VibeDump web dashboard
+Documentation=https://github.com/hermes-pi/vibe-dump
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/vibe-dump
+EnvironmentFile=-/home/pi/vibe-dump/.env
+Environment=VIBEDUMP_REGISTRY=real
+ExecStart=/home/pi/vibe-dump/.venv/bin/python -m vibedump.app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

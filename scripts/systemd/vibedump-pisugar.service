@@ -1,0 +1,19 @@
+[Unit]
+Description=VibeDump PiSugar battery poller
+Documentation=https://github.com/hermes-pi/vibe-dump
+ConditionPathExists=/dev/i2c-1
+After=vibedump.service
+Wants=vibedump.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/vibe-dump
+EnvironmentFile=-/home/pi/vibe-dump/.env
+ExecStart=/home/pi/vibe-dump/.venv/bin/python -m vibedump.integrations.pisugar_monitor
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

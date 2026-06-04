@@ -137,6 +137,22 @@ def _write_silent_wav(
         wf.writeframes(b"\x00\x00" * num_frames * channels)
 
 
+def _arecord_bin_available() -> bool:
+    """Return True if the ALSA ``arecord`` binary is on PATH.
+
+    Smoke gate: short-circuits the auto factory to fake on dev boxes
+    where the audio stack isn't installed, so callers don't pay for a
+    failed subprocess fork on every cold start.
+    """
+    from vibedump.integrations.hardware_probe import check_bins
+
+    return all(
+        r.available
+        for r in check_bins()
+        if r.name == "arecord"
+    )
+
+
 def make_audio_capture(prefer: str = "auto") -> AudioCapture:
     """Pick the best ``AudioCapture`` for this environment.
 
@@ -151,7 +167,7 @@ def make_audio_capture(prefer: str = "auto") -> AudioCapture:
     if prefer == "arecord":
         return ArecordCapture()
     # auto
-    if shutil.which("arecord") is not None:
+    if _arecord_bin_available():
         return ArecordCapture()
     return FakeAudioCapture()
 
