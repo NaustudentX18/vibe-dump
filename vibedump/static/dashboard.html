@@ -695,6 +695,37 @@
         </div>
       </details>
     </div>
+
+    <h2>🤖 Agent</h2>
+    <div id="agentStatus" class="field" aria-live="polite">
+      <div class="health-row" id="agentDaemonRow">
+        <span class="health-dot" id="agentDaemonDot"></span>
+        <span id="agentDaemonLabel">Checking daemon…</span>
+      </div>
+      <div class="health-row" id="agentCountsRow">
+        <span class="health-dot" id="agentCountsDot"></span>
+        <span id="agentCountsLabel">—</span>
+      </div>
+      <div class="field">
+        <label>Tools</label>
+        <div id="agentToolsList" class="xp-info">—</div>
+      </div>
+      <div id="agentRuntimeError" class="xp-info" style="display:none;color:var(--accent-bad);"></div>
+    </div>
+    <form id="agentRunForm" class="field">
+      <label for="agentPrompt">Prompt</label>
+      <textarea id="agentPrompt" rows="3" required maxlength="8000" placeholder="Ask the agent to do something…"></textarea>
+      <div class="field-row" style="margin-top:6px;">
+        <input id="agentKind" placeholder="oneshot" maxlength="40" />
+        <input id="agentPriority" type="number" min="-100" max="100" value="0" />
+      </div>
+      <button class="btn primary" type="submit">🚀 Run job</button>
+    </form>
+    <div class="field">
+      <label>Recent jobs</label>
+      <div id="agentJobList" class="dump-list" style="max-height:35vh;"></div>
+      <button class="btn" id="agentRefreshBtn" type="button" style="margin-top:6px;">↻ Refresh</button>
+    </div>
   </aside>
 
   <main class="app-main">
@@ -777,6 +808,12 @@
       storageExport: "/api/storage/export",
       storageImport: "/api/storage/import",
       storageRedact: "/api/storage/redact-preview",
+      agentRun: "/api/agent/run",
+      agentJobs: "/api/agent/jobs",
+      agentJob: (id) => `/api/agent/jobs/${id}`,
+      agentCancel: (id) => `/api/agent/jobs/${id}/cancel`,
+      agentRetry: (id) => `/api/agent/jobs/${id}/retry`,
+      agentHealth: "/api/agent/health",
     };
 
     async function api(path, opts = {}) {
@@ -1240,6 +1277,30 @@
         loadStorageStatus();
         loadDumps();
       });
+      es.addEventListener("agent.job_enqueued", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        showToast(`🤖 Job ${(data.job_id || "").slice(0, 8)} enqueued (${data.kind || "oneshot"})`);
+        loadAgentJobs();
+        loadAgentHealth();
+      });
+      es.addEventListener("agent.job_cancelled", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        showToast(`🤖 Job ${(data.job_id || "").slice(0, 8)} cancelled`);
+        loadAgentJobs();
+        loadAgentHealth();
+      });
+      es.addEventListener("agent.job_completed", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        showToast(`🤖 Job ${(data.job_id || "").slice(0, 8)} completed`);
+        loadAgentJobs();
+        loadAgentHealth();
+      });
+      es.addEventListener("agent.job_failed", (e) => {
+        const data = JSON.parse(e.data).payload || {};
+        showToast(`🤖 Job ${(data.job_id || "").slice(0, 8)} failed: ${data.error || "unknown"}`);
+        loadAgentJobs();
+        loadAgentHealth();
+      });
       es.onerror = () => { setTimeout(connectSSE, 3000); };
     }
 
@@ -1277,6 +1338,145 @@
           stopPttPolling();
         }
       }, 500);
+    }
+
+    async function loadAgentHealth() {
+      const dot = $("#agentDaemonDot");
+      const label = $("#agentDaemonLabel");
+      const counts = $("#agentCountsLabel");
+      const tools = $("#agentToolsList");
+      const err = $("#agentRuntimeError");
+      try {
+        const data = await api(API.agentHealth);
+        if (dot) dot.style.background = data.daemon ? "var(--accent-good)" : "var(--accent-bad)";
+        if (label) label.textContent = data.daemon ? "daemon running" : "daemon stopped";
+        if (counts) {
+          counts.textContent = `pending ${data.queue_pending} · claimed ${data.queue_claimed}`;
+        }
+        if (tools) {
+          tools.textContent = (data.tools || []).length > 0
+            ? (data.tools || []).join(", ")
+            : "(no tools registered)";
+        }
+        if (err) {
+          if (data.runtime_error) {
+            err.style.display = "block";
+            err.textContent = data.runtime_error;
+          } else {
+            err.style.display = "none";
+            err.textContent = "";
+          }
+        }
+        return data;
+      } catch (e) {
+        if (dot) dot.style.background = "var(--accent-bad)";
+        if (label) label.textContent = `agent unavailable: ${e.message}`;
+        if (counts) counts.textContent = "—";
+        if (tools) tools.textContent = "—";
+        return null;
+      }
+    }
+
+    async function loadAgentJobs() {
+      const root = $("#agentJobList");
+      if (!root) return;
+      try {
+        const data = await api(API.agentJobs);
+        renderAgentJobs(data.items || []);
+      } catch (e) {
+        root.innerHTML = "";
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = `Jobs unavailable: ${e.message}`;
+        root.appendChild(empty);
+      }
+    }
+
+    function renderAgentJobs(jobs) {
+      const root = $("#agentJobList");
+      if (!root) return;
+      root.innerHTML = "";
+      if (!jobs || jobs.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No agent jobs yet.";
+        root.appendChild(empty);
+        return;
+      }
+      for (const job of jobs) {
+        const row = document.createElement("div");
+        row.className = "ach-row";
+        const title = document.createElement("div");
+        title.className = "ach-title";
+        title.textContent = `${job.status} · ${job.kind} · ${(job.prompt || "").slice(0, 60)}`;
+        const desc = document.createElement("div");
+        desc.className = "ach-desc";
+        const when = job.completed_at || job.claimed_at || job.created_at || "";
+        desc.textContent = `id ${job.id.slice(0, 8)} · attempts ${job.attempts}/${job.max_attempts} · ${when}`;
+        if (job.error) {
+          const errLine = document.createElement("div");
+          errLine.className = "ach-desc";
+          errLine.style.color = "var(--accent-bad)";
+          errLine.textContent = `error: ${job.error}`;
+          row.appendChild(errLine);
+        }
+        row.appendChild(title);
+        row.appendChild(desc);
+        const actions = document.createElement("div");
+        actions.className = "row-actions";
+        if (job.status === "pending" || job.status === "claimed") {
+          const cancelBtn = document.createElement("button");
+          cancelBtn.className = "btn";
+          cancelBtn.type = "button";
+          cancelBtn.textContent = "✕ Cancel";
+          cancelBtn.addEventListener("click", () => agentCancelJob(job.id));
+          actions.appendChild(cancelBtn);
+        }
+        if (job.status === "failed" || job.status === "cancelled") {
+          const retryBtn = document.createElement("button");
+          retryBtn.className = "btn";
+          retryBtn.type = "button";
+          retryBtn.textContent = "↻ Retry";
+          retryBtn.addEventListener("click", () => agentRetryJob(job.id));
+          actions.appendChild(retryBtn);
+        }
+        if (actions.childElementCount > 0) row.appendChild(actions);
+        root.appendChild(row);
+      }
+    }
+
+    async function agentCancelJob(id) {
+      try {
+        await api(API.agentCancel(id), { method: "POST" });
+        showToast(`Job ${id.slice(0, 8)} cancelled`);
+        await loadAgentJobs();
+      } catch (e) { showToast(`Cancel failed: ${e.message}`); }
+    }
+
+    async function agentRetryJob(id) {
+      try {
+        const res = await api(API.agentRetry(id), { method: "POST" });
+        showToast(`Re-enqueued as ${res.job_id.slice(0, 8)}`);
+        await loadAgentJobs();
+      } catch (e) { showToast(`Retry failed: ${e.message}`); }
+    }
+
+    async function submitAgentJob(ev) {
+      ev.preventDefault();
+      const prompt = $("#agentPrompt").value.trim();
+      if (!prompt) return showToast("Prompt cannot be blank");
+      const kind = ($("#agentKind").value.trim() || "oneshot");
+      const priority = Number($("#agentPriority").value || 0);
+      try {
+        const res = await api(API.agentRun, {
+          method: "POST",
+          body: JSON.stringify({ prompt, kind, priority }),
+        });
+        showToast(`Job ${res.job_id.slice(0, 8)} enqueued`);
+        $("#agentPrompt").value = "";
+        await loadAgentJobs();
+        await loadAgentHealth();
+      } catch (e) { showToast(`Run failed: ${e.message}`); }
     }
 
     function bindEvents() {
@@ -1348,6 +1548,17 @@
 
       bindPttButton();
       bindStorageEvents();
+      bindAgentEvents();
+    }
+
+    function bindAgentEvents() {
+      const form = $("#agentRunForm");
+      if (form) form.addEventListener("submit", submitAgentJob);
+      const refresh = $("#agentRefreshBtn");
+      if (refresh) refresh.addEventListener("click", () => {
+        loadAgentHealth();
+        loadAgentJobs();
+      });
     }
 
     function bindPttButton() {
@@ -1579,6 +1790,8 @@
           loadAchievements(),
           loadDefaultLlmOptions(),
           loadStorageStatus(),
+          loadAgentHealth(),
+          loadAgentJobs(),
         ]);
         setMascotState("idle");
         connectSSE();

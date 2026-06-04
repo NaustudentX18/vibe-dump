@@ -1,0 +1,24 @@
+[Unit]
+Description=VibeDump OpenClaude agent daemon
+Documentation=https://github.com/hermes-pi/vibe-dump
+After=network-online.target
+Wants=network-online.target
+# The agent daemon reads and writes the same SQLite file the web
+# dashboard uses, so it must come up after the web process (which
+# initialises the schema on first start).
+Wants=vibedump.service
+After=vibedump.service
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/vibe-dump
+EnvironmentFile=-/home/pi/vibe-dump/.env
+Environment=VIBEDUMP_REGISTRY=real
+ExecStart=/home/pi/vibe-dump/.venv/bin/python -m vibedump.agent.daemon
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

@@ -120,6 +120,16 @@ class AppState:
     # Tracks the most recent storage activity for the dashboard's status
     # drawer. Keyed by string attribute name; values are JSON-serialisable.
     storage_state: dict[str, Any] = field(default_factory=dict)
+    # M9 agent runtime. Each field is ``None`` when its parallel module
+    # has not landed; routes 503 cleanly in that case so the rest of the
+    # app still works. ``agent_daemon_thread`` is the background pump
+    # started by ``_create_default_state`` when the runtime is complete.
+    agent_queue: Any = None
+    agent: Any = None
+    agent_registry: Any = None
+    agent_daemon: Any = None
+    agent_daemon_thread: threading.Thread | None = None
+    agent_runtime_error: str | None = None
 
     def close(self) -> None:
         if self.pisugar_monitor is not None:
@@ -182,7 +192,95 @@ def _create_default_state() -> AppState:
     # the in-memory fake when the real binary is missing, so we don't have
     # to guard with a try/except like the hardware bridges above.
     state.rclone = make_rclone("auto")
+    # M9 agent runtime. Best-effort: each parallel module is imported
+    # lazily; if any is missing we record the reason and the routes
+    # return 503 with a clear error. The daemon thread only starts if
+    # every required piece is available.
+    _wire_agent_runtime(state)
     return state
+
+
+def _wire_agent_runtime(state: AppState) -> None:
+    """Best-effort wiring of the M9 agent runtime onto ``state``.
+
+    The four pre-assumed modules are imported individually so a single
+    missing module does not poison the others. The daemon is started
+    only when all four land; otherwise ``state.agent_runtime_error``
+    holds a short, human-readable reason the routes surface as 503.
+    """
+    errors: list[str] = []
+
+    # JobQueue lives in this package already; the import here is for
+    # symmetry with the rest of the agent runtime and to pin the
+    # dependency at the wiring site.
+    try:
+        from .agent.queue import JobQueue as _JobQueue
+
+        # ``Database`` exposes its connection target as ``.path``; we
+        # reuse that exact path so the queue writes to the same SQLite
+        # file the rest of the app uses. For in-memory databases this
+        # is also ``":memory:"``, which sqlite3 understands.
+        state.agent_queue = _JobQueue(state.db.path)
+    except Exception as exc:  # pragma: no cover - defensive
+        errors.append(f"queue: {exc}")
+        state.agent_queue = None
+
+    try:
+        from .agent.core import OpenClaude as _OpenClaude
+        from .agent.config import AgentConfig as _AgentConfig
+
+        # ``OpenClaude`` needs (config, tools, llm). We build a default
+        # config and reuse the registry we just constructed above. The
+        # LLM is None so the runtime falls back to its built-in default.
+        config = _AgentConfig()
+        state.agent = _OpenClaude(
+            config=config,
+            tools=state.agent_registry,
+        )
+    except Exception as exc:
+        errors.append(f"core: {exc}")
+        state.agent = None
+
+    try:
+        # The parallel agent module exposes ``build_tools`` (a list of
+        # ``ToolDefinition``) plus a ``ToolRegistry`` wrapper. The spec
+        # referred to the combination as ``build_default_registry``;
+        # we wire both halves here.
+        from .agent.tools import build_tools as _build_tools
+        from .agent.registry import ToolRegistry as _ToolRegistry
+
+        tools = _build_tools(
+            state.db,
+            state.pipeline,
+            bridge=state.rclone,
+            data_dir=state.data_dir,
+        )
+        state.agent_registry = _ToolRegistry(tools)
+    except Exception as exc:
+        errors.append(f"tools: {exc}")
+        state.agent_registry = None
+
+    # Only start the daemon if every required piece is present.
+    if state.agent_queue is not None and state.agent is not None:
+        try:
+            from .agent.daemon import OpenClaudeDaemon as _Daemon
+
+            state.agent_daemon = _Daemon(
+                queue=state.agent_queue, agent=state.agent
+            )
+            state.agent_daemon_thread = threading.Thread(
+                target=state.agent_daemon.run_forever,
+                name="agent-daemon",
+                daemon=True,
+            )
+            state.agent_daemon_thread.start()
+        except Exception as exc:
+            errors.append(f"daemon: {exc}")
+            state.agent_daemon = None
+            state.agent_daemon_thread = None
+
+    if errors:
+        state.agent_runtime_error = "; ".join(errors)
 
 
 def _dump_to_dict(dump: DumpRecord) -> dict[str, Any]:
@@ -1011,6 +1109,191 @@ def create_app(state: AppState | None = None) -> Any:
                 detail=f"config_redact integration is not available: {exc}",
             ) from exc
         return {"redacted": redact(body.config)}
+
+    # ------------------------------------------------------------------
+    # M9: Agent HTTP routes. Five endpoints: enqueue, list, get, cancel,
+    # retry, plus a health check. All six short-circuit to 503 with a
+    # clear error if the parallel agent modules have not landed.
+    # ------------------------------------------------------------------
+
+    class AgentRunRequest(BaseModel):
+        prompt: str = Field(min_length=1, max_length=8000)
+        kind: str = Field(default="oneshot", min_length=1, max_length=40)
+        priority: int = Field(default=0, ge=-100, le=100)
+
+    def _agent_available() -> bool:
+        return app_state.agent_queue is not None
+
+    def _agent_unavailable_detail() -> str:
+        if app_state.agent_runtime_error:
+            return f"agent runtime unavailable: {app_state.agent_runtime_error}"
+        return "agent runtime unavailable on this host"
+
+    def _job_to_dict(record: Any) -> dict[str, Any]:
+        return {
+            "id": record.id,
+            "kind": record.kind,
+            "status": record.status,
+            "priority": record.priority,
+            "prompt": record.prompt,
+            "result": record.result,
+            "error": record.error,
+            "attempts": record.attempts,
+            "max_attempts": record.max_attempts,
+            "created_at": record.created_at,
+            "claimed_at": record.claimed_at,
+            "completed_at": record.completed_at,
+            "metadata": dict(record.metadata or {}),
+        }
+
+    def _queue_counts(queue: Any) -> dict[str, int]:
+        """Return {pending, claimed, complete, failed, cancelled} counts."""
+        out: dict[str, int] = {
+            "pending": 0,
+            "claimed": 0,
+            "complete": 0,
+            "failed": 0,
+            "cancelled": 0,
+        }
+        # ``list_jobs`` doesn't paginate by status, so we issue one call
+        # per known status. The table is small in dev; the dashboard
+        # polls once per few seconds at most.
+        for status_name in tuple(out):
+            try:
+                rows = queue.list_jobs(status=status_name, limit=10_000)
+            except Exception:
+                rows = []
+            out[status_name] = len(rows)
+        return out
+
+    @app.post("/api/agent/run")
+    def agent_run(body: AgentRunRequest) -> dict[str, Any]:
+        if not _agent_available():
+            raise HTTPException(status_code=503, detail=_agent_unavailable_detail())
+        prompt = body.prompt.strip()
+        if not prompt:
+            raise HTTPException(status_code=400, detail="prompt cannot be blank")
+        record = app_state.agent_queue.enqueue(
+            body.kind, prompt, priority=body.priority
+        )
+        app_state.bus.publish(
+            "agent.job_enqueued",
+            {"job_id": record.id, "kind": record.kind, "priority": record.priority},
+        )
+        return {"job_id": record.id, "status": record.status}
+
+    @app.get("/api/agent/jobs")
+    def agent_jobs(
+        status_filter: str | None = Query(default=None, alias="status", max_length=20),
+        kind: str | None = Query(default=None, max_length=40),
+        limit: int = Query(default=50, ge=1, le=500),
+    ) -> dict[str, Any]:
+        if not _agent_available():
+            raise HTTPException(status_code=503, detail=_agent_unavailable_detail())
+        items = app_state.agent_queue.list_jobs(
+            status=status_filter, kind=kind, limit=limit
+        )
+        return {
+            "items": [_job_to_dict(j) for j in items],
+            "counts": _queue_counts(app_state.agent_queue),
+        }
+
+    @app.get("/api/agent/jobs/{job_id}")
+    def agent_job_get(job_id: str) -> dict[str, Any]:
+        if not _agent_available():
+            raise HTTPException(status_code=503, detail=_agent_unavailable_detail())
+        record = app_state.agent_queue.get(job_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="agent job not found")
+        return _job_to_dict(record)
+
+    @app.post("/api/agent/jobs/{job_id}/cancel")
+    def agent_job_cancel(job_id: str) -> dict[str, Any]:
+        if not _agent_available():
+            raise HTTPException(status_code=503, detail=_agent_unavailable_detail())
+        if app_state.agent_queue.get(job_id) is None:
+            raise HTTPException(status_code=404, detail="agent job not found")
+        # Prefer the daemon's best-effort cancel for in-flight jobs.
+        if app_state.agent_daemon is not None:
+            app_state.agent_daemon.cancel(job_id)
+        cancelled = app_state.agent_queue.cancel(job_id)
+        if not cancelled:
+            # Job was already in a terminal state; treat as 409 so the
+            # client knows their request was a no-op.
+            raise HTTPException(status_code=409, detail="agent job is not cancellable")
+        app_state.bus.publish("agent.job_cancelled", {"job_id": job_id})
+        return {"job_id": job_id, "status": "cancelled"}
+
+    @app.post("/api/agent/jobs/{job_id}/retry")
+    def agent_job_retry(job_id: str) -> dict[str, Any]:
+        if not _agent_available():
+            raise HTTPException(status_code=503, detail=_agent_unavailable_detail())
+        original = app_state.agent_queue.get(job_id)
+        if original is None:
+            raise HTTPException(status_code=404, detail="agent job not found")
+        if original.status not in ("failed", "cancelled"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"agent job in status {original.status!r} cannot be retried",
+            )
+        new_record = app_state.agent_queue.enqueue(
+            original.kind,
+            original.prompt,
+            priority=original.priority,
+            metadata={**(original.metadata or {}), "retry_of": original.id},
+        )
+        app_state.bus.publish(
+            "agent.job_enqueued",
+            {
+                "job_id": new_record.id,
+                "kind": new_record.kind,
+                "priority": new_record.priority,
+                "retry_of": original.id,
+            },
+        )
+        return {
+            "job_id": new_record.id,
+            "status": new_record.status,
+            "retry_of": original.id,
+        }
+
+    @app.get("/api/agent/health")
+    def agent_health() -> dict[str, Any]:
+        queue = app_state.agent_queue
+        daemon_obj = app_state.agent_daemon
+        thread = app_state.agent_daemon_thread
+        daemon_alive = bool(
+            thread is not None and thread.is_alive() and daemon_obj is not None
+        )
+        pending = 0
+        claimed = 0
+        if queue is not None:
+            counts = _queue_counts(queue)
+            pending = counts["pending"]
+            claimed = counts["claimed"]
+        tool_names: list[str] = []
+        registry = app_state.agent_registry
+        if registry is not None:
+            names_getter = getattr(registry, "list", None) or getattr(
+                registry, "names", None
+            )
+            if callable(names_getter):
+                try:
+                    tool_names = list(names_getter())
+                except Exception:
+                    tool_names = []
+            elif hasattr(registry, "tools"):
+                try:
+                    tool_names = list(registry.tools.keys())  # type: ignore[attr-defined]
+                except Exception:
+                    tool_names = []
+        return {
+            "daemon": daemon_alive,
+            "queue_pending": pending,
+            "queue_claimed": claimed,
+            "tools": tool_names,
+            "runtime_error": app_state.agent_runtime_error,
+        }
 
     return app
 
