@@ -37,8 +37,11 @@ mobile-first dashboard also works from your phone on the same LAN.
 ## Quickstart
 
 ```bash
-# One-liner (when the repo is public; see INSTALL.md for the manual path)
-curl -fsSL https://raw.githubusercontent.com/forestwelch/vibe-dump/main/scripts/install.sh | bash
+# One-liner (canonical placeholder; replace with the real upstream URL)
+curl -fsSL https://raw.githubusercontent.com/<placeholder>/vibe-dump/main/scripts/install.sh | bash
+
+# Or the live public repo:
+curl -fsSL https://raw.githubusercontent.com/NaustudentX18/vibe-dump/main/scripts/install.sh | bash
 ```
 
 ### Manual install
@@ -88,9 +91,9 @@ machine with SQLite-backed snapshot persistence.
 ## Features
 
 ### Capture & providers
-- **Push-to-talk recording** — USB or 3.5 mm mic, exposed to the agent
-  pipeline as in-process WAVs. Works from the web UI, the Pi HAT
-  buttons, or the mobile dashboard.
+- **Voice capture** — push-to-talk recording via USB or 3.5 mm mic,
+  exposed to the agent pipeline as in-process WAVs. Works from the
+  web UI, the Pi HAT buttons, or the mobile dashboard.
 - **`faster-whisper` STT** with a `fake` fallback for tests and
   zero-config dev.
 - **Piper TTS** for audible readback of the listener's clarifying
