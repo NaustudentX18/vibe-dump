@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Iterator
 
-from .agent_pipeline import FakeAgentPipeline
+from .agent_pipeline import AgentPipeline
 from .database import (
     BlueprintRecord,
     Database,
@@ -40,7 +40,7 @@ class AppState:
 
     db: Database
     bus: EventBus
-    pipeline: FakeAgentPipeline
+    pipeline: AgentPipeline
     memory: RagMemory
     device_state: DeviceState = DeviceState.IDLE
 
@@ -59,7 +59,7 @@ def _create_default_state() -> AppState:
     return AppState(
         db=db,
         bus=bus,
-        pipeline=FakeAgentPipeline(db, registry=registry),
+        pipeline=AgentPipeline(db, registry=registry, bus=bus),
         memory=RagMemory(db),
     )
 
@@ -124,6 +124,9 @@ def create_app(state: AppState | None = None) -> Any:
         title: str = Field(min_length=1, max_length=200)
         audio_path: str | None = None
         metadata: dict[str, Any] = Field(default_factory=dict)
+
+    class AddTurnRequest(BaseModel):
+        text: str = Field(min_length=1, max_length=4000)
 
     class UpdateStatusRequest(BaseModel):
         status: str = Field(min_length=1, max_length=40)
@@ -214,6 +217,26 @@ def create_app(state: AppState | None = None) -> Any:
         return {
             "dump_id": result.dump_id,
             "transcript": result.transcript,
+            "blueprint": result.blueprint,
+        }
+
+    @app.post("/api/dumps/{dump_id}/turn", status_code=status.HTTP_201_CREATED)
+    def add_turn(dump_id: int, body: AddTurnRequest, st: State) -> dict[str, Any]:  # type: ignore[valid-type]
+        if st.db.get_dump(dump_id) is None:
+            raise HTTPException(status_code=404, detail="dump not found")
+        st.bus.publish("dump.user_turn", {"dump_id": dump_id, "text": body.text})
+        try:
+            st.pipeline.add_user_turn(dump_id, body.text)
+            result = st.pipeline.step_listener(dump_id)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {
+            "dump_id": result.dump_id,
+            "action": result.action.value,
+            "assistant_text": result.assistant_text,
+            "status": result.status,
             "blueprint": result.blueprint,
         }
 
