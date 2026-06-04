@@ -1,13 +1,13 @@
 # Vibe-Dump
 
-> **Voice dumps → software blueprints, on a Pi 5.**
+> **Voice dumps → software blueprints, on a Pi Zero 2 W.**
 
 Vibe-Dump is a pocket-sized AI spec goblin for turning chaotic voice
 ideas into build-ready **Vibe Coding Blueprints** you can drop straight
 into Cursor, Claude Code, Codex, or Gemini. Talk into a microphone; the
 active-listener LLM asks short clarifying questions; at the end you
 get a structured markdown blueprint in your hand. The whole thing
-runs as a single Python process on a Raspberry Pi 5 wearing a
+runs as a single Python process on a Raspberry Pi Zero 2 W wearing a
 Whisplay HAT, a PiSugar 3 battery, and a USB microphone — and the
 mobile-first dashboard also works from your phone on the same LAN.
 
@@ -159,7 +159,7 @@ for the pin map and assembly photos.
 
 | Qty | Item | Notes |
 |----:|------|-------|
-| 1 | Raspberry Pi 5 (8 GB+) | 4 GB is too tight once Whisper + the web worker run together |
+| 1 | Raspberry Pi Zero 2 W | 512 MB RAM — stick to the `tiny` Whisper model and run STT on a desktop host if you need bigger models |
 | 1 | Waveshare Whisplay HAT | 240×280 ST7789 LCD + 4 buttons + WS2812 LED |
 | 1 | PiSugar 3 battery HAT | I2C telemetry, 5 V boost, optional UPS |
 | 1 | USB or 3.5 mm microphone | any ALSA-visible input works |

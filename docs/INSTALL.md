@@ -12,7 +12,8 @@ manual path below in the meantime.
 ## Manual install
 
 Requires Python 3.11+ and (for the full hardware target) a
-Raspberry Pi 5 running Raspberry Pi OS Bookworm.
+Raspberry Pi Zero 2 W running Raspberry Pi OS Bookworm (Lite works
+fine; we don't need a desktop).
 
 ```bash
 # 1. Clone the repo

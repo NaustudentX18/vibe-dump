@@ -1,9 +1,9 @@
 # Hardware
 
-The canonical physical target is a Raspberry Pi 5 wearing a Waveshare
-Whisplay HAT, a PiSugar 3 battery HAT, a USB or 3.5 mm microphone, and
-a speaker. This page documents the pin map, the I2C addresses, and
-the assembly steps the install script automates.
+The canonical physical target is a Raspberry Pi Zero 2 W wearing a
+Waveshare Whisplay HAT, a PiSugar 3 battery HAT, a USB microphone, and
+a USB or Bluetooth speaker. This page documents the pin map, the I2C
+addresses, and the assembly steps the install script automates.
 
 ## Whisplay HAT pin map
 
@@ -54,9 +54,10 @@ Any ALSA-visible input works. The recommended choices are:
 
 - **USB microphone** — plug-and-play, no `alsactl` config required.
   Listed as `hw:0,0` once enumerated.
-- **3.5 mm headset / lav mic** — works through the Pi's onboard TRRS
-  jack when `dtparam=audio=on` is set in `/boot/firmware/config.txt`.
-  May need a one-time `alsamixer` F-volume bump on Pi OS Bookworm.
+- **3.5 mm headset / lav mic + USB audio dongle** — the Pi Zero 2 W
+  has no onboard audio jack, so a $3 USB sound card is the cheapest
+  path. May need a one-time `alsamixer` F-volume bump on Pi OS
+  Bookworm.
 
 The audio-capture bridge uses `arecord` from `alsa-utils` and writes
 WAVs into `$VIBEDUMP_PTT_DIR` (default `/tmp`).
@@ -65,7 +66,9 @@ WAVs into `$VIBEDUMP_PTT_DIR` (default `/tmp`).
 
 Two options:
 
-- **3.5 mm jack** — Pi 5's onboard TRRS; `aplay`-compatible, no extra
+- **USB or Bluetooth speaker** — the Pi Zero 2 W has no onboard audio
+  jack, so a small USB speaker (or any A2DP Bluetooth speaker paired
+  via `bluetoothctl`) is the path. `aplay`-compatible, no extra
   wiring. Quality is fine for the listener's short follow-up prompts.
 - **Whisplay built-in piezo path** — the HAT does not include a
   speaker, but the LCD's backlight driver exposes a PWM output some
@@ -80,20 +83,20 @@ Two options:
 
 ## Power budget
 
-A 5 V / 3 A USB-C supply is recommended. Worst-case draws measured
-on a Pi 5 8 GB with the HATs stacked, Whisper running, and Wi-Fi
-active:
+A 5 V / 2.5 A micro-USB supply is recommended. Worst-case draws
+measured on a Pi Zero 2 W with the HATs stacked, Whisper `tiny`
+running, and Wi-Fi active:
 
 | Load | Typical draw |
 |------|--------------|
-| Pi 5 idle (no HAT) | ~0.8 A |
-| Pi 5 + Whisplay (LCD + LED) | ~1.2 A |
-| Pi 5 + Whisplay + PiSugar (charging) | ~2.0 A |
-| Pi 5 + Whisplay + PiSugar + Whisper (CPU + I/O) | ~2.6 A |
-| + Wi-Fi transmit bursts | peaks at ~2.9 A |
+| Pi Zero 2 W idle (no HAT) | ~0.15 A |
+| Pi Zero 2 W + Whisplay (LCD + LED) | ~0.30 A |
+| Pi Zero 2 W + Whisplay + PiSugar (charging) | ~0.80 A |
+| Pi Zero 2 W + Whisplay + PiSugar + Whisper (CPU + I/O) | ~1.10 A |
+| + Wi-Fi transmit bursts | peaks at ~1.30 A |
 
-A 3 A supply gives ~10 % headroom for inrush. The PiSugar 3 acts as
-a small UPS and will power the Pi through brown-outs of a few
+A 2.5 A supply gives ~80 % headroom for inrush. The PiSugar 3 acts
+as a small UPS and will power the Pi through brown-outs of a few
 seconds; do not rely on it for sustained unplugged runtime at peak
 draw.
 

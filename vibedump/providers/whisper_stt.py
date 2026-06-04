@@ -1,4 +1,4 @@
-"""Whisper STT adapter (faster-whisper, runs locally on the Pi 5).
+"""Whisper STT adapter (faster-whisper, runs locally on the Pi Zero 2 W).
 
 `faster_whisper` is imported lazily so a missing install never crashes
 the provider registry — `.health()` simply reports the absence and the

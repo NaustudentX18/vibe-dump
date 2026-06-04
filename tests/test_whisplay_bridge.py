@@ -319,7 +319,7 @@ def test_constants_match_whisplay_schematic() -> None:
     assert WHISPLAY_WIDTH == 240
     assert WHISPLAY_HEIGHT == 280
     assert WHISPLAY_BUTTON_PINS == {"A": 5, "B": 6, "C": 16, "D": 24}
-    # Each pin is a valid BCM GPIO number (0-27 on a Pi 5).
+    # Each pin is a valid BCM GPIO number (0-27 on a Pi Zero 2 W).
     for letter, pin in WHISPLAY_BUTTON_PINS.items():
         assert 0 <= pin <= 27, f"{letter} pin {pin} out of range"
 

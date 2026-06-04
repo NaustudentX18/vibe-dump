@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Whisplay HAT prerequisites on a Raspberry Pi 5.
+# Install Whisplay HAT prerequisites on a Raspberry Pi Zero 2 W.
 #
 # Idempotent: re-running this script on a fully configured system is a no-op.
 # Requires: sudo (apt, modprobe, raspi-config, groupmod) and a Pi-family CPU.

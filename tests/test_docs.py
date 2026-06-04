@@ -33,7 +33,7 @@ def _read(path: Path) -> str:
 def test_readme_has_hero() -> None:
     text = _read(README)
     assert "Vibe-Dump" in text
-    assert "Voice dumps" in text and "Pi 5" in text
+    assert "Voice dumps" in text and "Pi Zero 2 W" in text
     # The hero line is the very first non-heading content
     hero_line = text.splitlines()[2] if len(text.splitlines()) > 2 else ""
     assert "Voice dumps" in hero_line, f"hero line not on row 3: {hero_line!r}"
@@ -69,7 +69,7 @@ def test_readme_has_quickstart() -> None:
 def test_readme_has_hardware_bom() -> None:
     text = _read(README)
     assert re.search(r"^##\s+Hardware BOM\s*$", text, re.MULTILINE), "no BOM heading"
-    for needle in ("Raspberry Pi 5", "Whisplay", "PiSugar", "microphone", "Speaker"):
+    for needle in ("Raspberry Pi Zero 2 W", "Whisplay", "PiSugar", "microphone", "Speaker"):
         assert needle.lower() in text.lower(), f"BOM missing: {needle!r}"
 
 

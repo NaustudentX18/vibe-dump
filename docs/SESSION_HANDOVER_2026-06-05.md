@@ -112,7 +112,7 @@ No `master..origin` drift. Working tree clean.
    `Graph` import with the `GraphBuilder` API and drop the
    one remaining `PydanticGraphDeprecationWarning`.
 4. **Live screenshots** — `docs/screenshots/*.png` are 1-byte
-   placeholders. Capture real ones from a running Pi 5 (likely
+   placeholders. Capture real ones from a running Pi Zero 2 W (likely
    Playwright + the mobile dashboard) and commit them.
 5. **Bundle export v2** — include the pydantic-graph state snapshot
    in the zip so a receiving dump replays cleanly.
