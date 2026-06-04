@@ -13,10 +13,18 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Any, Iterator
+from typing import Any, Generator
 
 SCHEMA_VERSION = 1
 FTS_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _lastrowid(cur: sqlite3.Cursor) -> int:
+    """Return the just-inserted rowid, asserting the cursor produced one."""
+    rowid = cur.lastrowid
+    if rowid is None:
+        raise RuntimeError("INSERT did not produce a rowid")
+    return rowid
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +35,35 @@ class DumpRecord:
     created_at: str
     updated_at: str
     metadata: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class TurnRecord:
+    id: int
+    dump_id: int
+    role: str
+    text: str
+    audio_path: str | None
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class BlueprintRecord:
+    id: int
+    dump_id: int
+    markdown: str
+    created_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderConfigRecord:
+    id: int
+    name: str
+    kind: str
+    enabled: bool
+    config: dict[str, Any]
+    created_at: str
+    updated_at: str
 
 
 class Database:
@@ -52,7 +89,7 @@ class Database:
             self._conn.execute("PRAGMA synchronous = NORMAL")
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
+    def transaction(self) -> Generator[sqlite3.Connection, None, None]:
         with self._lock:
             try:
                 yield self._conn
@@ -188,7 +225,7 @@ class Database:
                 "INSERT INTO dumps(title, metadata_json) VALUES(?, ?)",
                 (title, json.dumps(metadata or {}, sort_keys=True)),
             )
-            return int(cur.lastrowid)
+            return _lastrowid(cur)
 
     def get_dump(self, dump_id: int) -> DumpRecord | None:
         with self._lock:
@@ -204,13 +241,120 @@ class Database:
             metadata=json.loads(row["metadata_json"]),
         )
 
+    def list_dumps(self, limit: int = 50, offset: int = 0) -> list[DumpRecord]:
+        if limit <= 0 or limit > 500:
+            raise ValueError("limit must be between 1 and 500")
+        if offset < 0:
+            raise ValueError("offset must be >= 0")
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM dumps ORDER BY id DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [
+            DumpRecord(
+                id=row["id"],
+                title=row["title"],
+                status=row["status"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                metadata=json.loads(row["metadata_json"]),
+            )
+            for row in rows
+        ]
+
+    def update_dump_status(self, dump_id: int, status: str) -> bool:
+        with self.transaction() as conn:
+            cur = conn.execute(
+                "UPDATE dumps SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (status, dump_id),
+            )
+            return cur.rowcount > 0
+
+    def list_turns(self, dump_id: int) -> list[TurnRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM turns WHERE dump_id = ? ORDER BY id ASC",
+                (dump_id,),
+            ).fetchall()
+        return [
+            TurnRecord(
+                id=row["id"],
+                dump_id=row["dump_id"],
+                role=row["role"],
+                text=row["text"],
+                audio_path=row["audio_path"],
+                created_at=row["created_at"],
+            )
+            for row in rows
+        ]
+
+    def get_latest_blueprint(self, dump_id: int) -> BlueprintRecord | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM blueprints WHERE dump_id = ? ORDER BY id DESC LIMIT 1",
+                (dump_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return BlueprintRecord(
+            id=row["id"],
+            dump_id=row["dump_id"],
+            markdown=row["markdown"],
+            created_at=row["created_at"],
+        )
+
+    def upsert_provider_config(
+        self,
+        name: str,
+        kind: str,
+        enabled: bool,
+        config: dict[str, Any],
+    ) -> int:
+        payload = json.dumps(config, sort_keys=True)
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO provider_configs(name, kind, enabled, config_json)
+                VALUES(?, ?, ?, ?)
+                ON CONFLICT(name, kind) DO UPDATE SET
+                    enabled = excluded.enabled,
+                    config_json = excluded.config_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (name, kind, 1 if enabled else 0, payload),
+            )
+            row = conn.execute(
+                "SELECT id FROM provider_configs WHERE name = ? AND kind = ?",
+                (name, kind),
+            ).fetchone()
+            return int(row["id"])
+
+    def list_provider_configs(self) -> list[ProviderConfigRecord]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM provider_configs ORDER BY kind, name"
+            ).fetchall()
+        return [
+            ProviderConfigRecord(
+                id=row["id"],
+                name=row["name"],
+                kind=row["kind"],
+                enabled=bool(row["enabled"]),
+                config=json.loads(row["config_json"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
     def add_turn(self, dump_id: int, role: str, text: str, audio_path: str | None = None) -> int:
         with self.transaction() as conn:
             cur = conn.execute(
                 "INSERT INTO turns(dump_id, role, text, audio_path) VALUES(?, ?, ?, ?)",
                 (dump_id, role, text, audio_path),
             )
-            return int(cur.lastrowid)
+            return _lastrowid(cur)
 
     def add_blueprint(self, dump_id: int, markdown: str) -> int:
         with self.transaction() as conn:
@@ -218,7 +362,7 @@ class Database:
                 "INSERT INTO blueprints(dump_id, markdown) VALUES(?, ?)",
                 (dump_id, markdown),
             )
-            return int(cur.lastrowid)
+            return _lastrowid(cur)
 
     def add_chunk(self, dump_id: int, source_type: str, source_id: int, chunk_index: int, content: str) -> int:
         with self.transaction() as conn:
@@ -229,7 +373,7 @@ class Database:
                 """,
                 (dump_id, source_type, source_id, chunk_index, content),
             )
-            return int(cur.lastrowid)
+            return _lastrowid(cur)
 
     def search_chunks(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         fts_query = " ".join(FTS_TOKEN_RE.findall(query))

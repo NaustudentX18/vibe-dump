@@ -51,3 +51,71 @@ def test_search_chunks_handles_literal_user_punctuation(tmp_path):
     assert db.search_chunks("voice-first")[0]["dump_id"] == dump_id
     assert db.search_chunks("???") == []
     db.close()
+
+
+def test_list_dumps_orders_newest_first_and_paginates(tmp_path):
+    db = Database(tmp_path / "list.sqlite3")
+    db.initialize()
+    ids = [db.create_dump(f"dump-{i}") for i in range(5)]
+    assert ids == sorted(ids)
+
+    page = db.list_dumps(limit=2, offset=1)
+    assert [d.id for d in page] == [ids[-2], ids[-3]]
+    assert all(d.title.startswith("dump-") for d in page)
+    db.close()
+
+
+def test_update_dump_status_returns_true_then_false(tmp_path):
+    db = Database(tmp_path / "status.sqlite3")
+    db.initialize()
+    dump_id = db.create_dump("status test")
+    initial = db.get_dump(dump_id)
+    assert initial is not None and initial.status == "draft"
+
+    assert db.update_dump_status(dump_id, "listening") is True
+    after = db.get_dump(dump_id)
+    assert after is not None and after.status == "listening"
+    assert db.update_dump_status(999, "listening") is False
+    db.close()
+
+
+def test_list_turns_returns_in_order(tmp_path):
+    db = Database(tmp_path / "turns.sqlite3")
+    db.initialize()
+    dump_id = db.create_dump("turn order")
+    db.add_turn(dump_id, "user", "first")
+    db.add_turn(dump_id, "assistant", "second")
+    db.add_turn(dump_id, "user", "third")
+
+    turns = db.list_turns(dump_id)
+    assert [t.text for t in turns] == ["first", "second", "third"]
+    assert [t.role for t in turns] == ["user", "assistant", "user"]
+    db.close()
+
+
+def test_latest_blueprint_returns_most_recent(tmp_path):
+    db = Database(tmp_path / "bp.sqlite3")
+    db.initialize()
+    dump_id = db.create_dump("blueprint")
+    db.add_blueprint(dump_id, "# older\n")
+    newer = db.add_blueprint(dump_id, "# newer\n")
+
+    bp = db.get_latest_blueprint(dump_id)
+    assert bp is not None
+    assert bp.id == newer
+    assert "newer" in bp.markdown
+    db.close()
+
+
+def test_provider_config_upsert_replaces_existing(tmp_path):
+    db = Database(tmp_path / "provider.sqlite3")
+    db.initialize()
+
+    first = db.upsert_provider_config("openrouter", "llm", False, {"api_key": "old"})
+    second = db.upsert_provider_config("openrouter", "llm", True, {"api_key": "new", "model": "x"})
+
+    configs = {c.name: c for c in db.list_provider_configs()}
+    assert configs["openrouter"].enabled is True
+    assert configs["openrouter"].config == {"api_key": "new", "model": "x"}
+    assert first == second
+    db.close()

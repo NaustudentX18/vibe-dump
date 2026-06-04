@@ -12,7 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-web = ["fastapi>=0.111", "uvicorn>=0.30"]
+web = ["fastapi>=0.118", "uvicorn>=0.30"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

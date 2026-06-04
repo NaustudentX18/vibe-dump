@@ -1,58 +1,140 @@
 # Vibe-Dump
 
-Vibe-Dump is a pocket AI spec goblin for turning chaotic voice ideas into build-ready software blueprints.
+> A pocket AI spec goblin for turning chaotic voice ideas into build-ready software blueprints.
 
-This repository currently implements the **Milestone 0/1 fake-first scaffold** from `/home/pi/VIBE_DUMP_BUILD_HANDOVER_2026-06-04.md`.
+Vibe-Dump runs on a Raspberry Pi Zero 2 W + PiSugar 3 + Whisplay HAT. You talk, it captures, an active-listener LLM asks short clarifying questions, and at the end you get a structured **Vibe Coding Blueprint** ready to drop into Cursor, Claude, Codex, or Gemini.
+
+This repo currently implements the **Milestone 2 fake-first scaffold** (web dashboard + JSON API) layered on top of the Milestone 0/1 database / RAG / fake pipeline foundation.
 
 ## Current status
 
-Implemented now:
+### Implemented
 
-- Python package scaffold under `vibedump/`.
+- Python package under `vibedump/`.
 - Config examples: `.env.example` and `config.example.json`.
-- Fake hardware, mascot, STT, LLM, and TTS components.
-- SQLite persistence with:
-  - WAL mode
-  - foreign key enforcement
-  - serialized writes through a small locked wrapper
-  - dump/turn/blueprint/chunk/provider/event/profile tables
-  - FTS5 table for MVP RAG search
-  - cascade cleanup for dump deletion
-- FTS-backed `RagMemory` chunking/search.
+- Fake hardware, mascot, STT, LLM, and TTS components (no real Whisplay/PiSugar touch yet).
+- SQLite persistence with WAL, FK enforcement, serialized writes, FTS5 search, and dump/turn/blueprint/chunk/provider/event/profile tables.
+- `RagMemory` chunking + BM25 search.
 - Fake pipeline that stores transcript, blueprint, and searchable memory.
-- Mobile dashboard placeholder at `vibedump/static/dashboard.html`.
-- Tests for database, RAG memory, fake providers, fake pipeline, and XP profile seed.
+- **FastAPI web surface** (`vibedump.app.create_app`) with:
+  - `GET /` mobile-first dashboard with hamburger drawer, settings drawer, bottom action bar, mascot state chip, live SSE updates.
+  - `GET /api/health`, `GET/POST /api/dumps`, `GET/PATCH/DELETE /api/dumps/{id}`, `GET /api/dumps/{id}/turns`, `GET /api/dumps/{id}/blueprint`, `POST /api/dumps/{id}/ingest-fake`, `PATCH /api/dumps/{id}/status`.
+  - `GET /api/search`, `GET /api/rag/memory` (BM25 over FTS).
+  - `GET/POST /api/providers` (registry health + per-provider config upsert).
+  - `GET /api/events` (SSE — streams the current event bus snapshot; clients reconnect via `EventSource`).
+- Tests for database CRUD, RAG memory, fake providers, fake pipeline, XP profile seed, and the full FastAPI surface (21 passing).
 
-Not implemented yet:
+### Not yet
 
-- Real Whisplay/PiSugar hardware control.
-- Real cloud/local provider adapters.
-- FastAPI dashboard routes beyond placeholders.
-- Google Drive/rclone sync.
-- PIL mascot rendering.
+- Real Whisplay daemon socket, PiSugar battery polling, real audio record/playback.
+- Real cloud/local STT/LLM/TTS adapters (only the `fake` registry is wired).
+- PIL mascot frames and XP / achievements UI.
+- Google Drive / rclone sync, exports, redacted config.
+- Systemd unit beyond the placeholder.
 
-## Quick verification
+## Architecture
+
+The handover in `/home/pi/VIBE_DUMP_BUILD_HANDOVER_2026-06-04.md` is the source of truth. Short version:
+
+```text
+vibedumpd: single Python process
+├── FastAPI on :8080 (one worker)
+├── AppState: { db, bus, pipeline, memory, device_state }
+│   ├── Database (SQLite WAL + FTS5, serialized writes)
+│   ├── EventBus (bounded deque, SSE)
+│   ├── FakeAgentPipeline (fake STT/LLM/TTS)
+│   └── RagMemory (chunk + BM25)
+└── mobile-first dashboard at /
+```
+
+512MB RAM is the binding constraint: one process, one web worker, no background threads that aren't strictly necessary. The SSE endpoint streams a snapshot and lets the browser reconnect, which keeps the server loop trivial.
+
+## Quick start (development)
 
 ```bash
 cd /home/pi/vibe-dump
-python -m pytest -q
-python -c "import vibedump; from vibedump.database import Database; from vibedump.ragmemory import RagMemory; print(vibedump.__version__)"
+python -m pytest -q            # 21 passed
+./scripts/run_dev.sh           # http://0.0.0.0:8080
 ```
 
-Expected test result for this milestone: `7 passed`.
+`run_dev.sh` installs the `web` extra on first run if FastAPI/uvicorn are missing. The dashboard is mobile-first; open it on a phone on the same LAN.
 
-## Development notes
+## HTTP API
 
-- Keep provider secrets in `.env` or local config only; never commit real keys.
-- Tests must not touch real Whisplay/PiSugar hardware.
-- The Pi Zero 2 W target has 512MB RAM, so keep dependencies lean.
-- Later web work can install the optional `web` extra (`fastapi`, `uvicorn`).
+| Method | Path                              | Purpose                                                |
+|--------|-----------------------------------|--------------------------------------------------------|
+| GET    | `/`                               | Mobile dashboard (HTML)                                |
+| GET    | `/api/health`                     | Liveness probe                                         |
+| GET    | `/api/dumps?limit&offset`         | List dumps (newest first)                              |
+| POST   | `/api/dumps`                      | Create a dump (optional `audio_path` seeds a turn)     |
+| GET    | `/api/dumps/{id}`                 | Single dump                                            |
+| DELETE | `/api/dumps/{id}`                 | Delete (cascades turns/blueprints/chunks)              |
+| GET    | `/api/dumps/{id}/turns`           | Transcript turns                                       |
+| GET    | `/api/dumps/{id}/blueprint`       | Latest blueprint markdown                              |
+| POST   | `/api/dumps/{id}/ingest-fake`     | Run the fake pipeline on an existing dump              |
+| PATCH  | `/api/dumps/{id}/status`          | Update device/dump status (drives the mascot)          |
+| GET    | `/api/search?q=...&limit=...`     | BM25 search over FTS chunks                            |
+| GET    | `/api/rag/memory?q=...`           | Alias of `/api/search`                                 |
+| GET    | `/api/providers`                  | Registry health + stored provider configs              |
+| POST   | `/api/providers`                  | Upsert a provider config (`name`, `kind`, `config`)    |
+| GET    | `/api/events`                     | SSE: replays the event bus snapshot                    |
+
+Event types emitted today: `dump.created`, `dump.deleted`, `blueprint.generated`, `provider.updated`, `dump.status`.
+
+## Configuration
+
+- `.env` (gitignored) — provider API keys, base URLs.
+- `config.example.json` — typed config defaults; copy to `config.json` for a persistent DB path.
+- The 512MB Pi Zero 2 W is the target, so the runtime deps stay minimal: `fastapi`, `uvicorn`, and the standard library.
+
+## Project layout
+
+```text
+vibe-dump/
+├── pyproject.toml
+├── README.md
+├── .env.example
+├── config.example.json
+├── vibedump/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── app.py              ← FastAPI factory + routes
+│   ├── server.py           ← uvicorn entrypoint
+│   ├── events.py
+│   ├── state.py
+│   ├── hardware_control.py
+│   ├── mascot_renderer.py
+│   ├── agent_pipeline.py
+│   ├── ragmemory.py
+│   ├── database.py
+│   ├── schemas.py
+│   ├── providers/
+│   ├── integrations/
+│   └── static/dashboard.html
+├── scripts/
+│   ├── run_dev.sh
+│   ├── install_systemd.sh
+│   ├── install_whisplay_prereqs.sh
+│   └── hardware_smoke.sh
+└── tests/
+    ├── test_database.py
+    ├── test_ragmemory.py
+    ├── test_agent_pipeline.py
+    ├── test_provider_router.py
+    ├── test_xp.py
+    ├── test_server.py
+    └── fakes/
+```
 
 ## Next milestones
 
-1. Expand FastAPI routes and mobile-first dashboard.
-2. Add provider registry health endpoints and configurable local/cloud adapters.
-3. Implement the full agent pipeline state machine.
-4. Add PIL mascot frames and XP/achievement UI.
-5. Add sync/export skeletons with redacted config only.
-6. Add Whisplay/PiSugar integration behind explicit hardware smoke gates.
+1. Provider registry health endpoints, configurable local/cloud adapters (OpenRouter, Gemini, NVIDIA, MiniMax, OpenAI, Groq).
+2. Full agent pipeline state machine (active listener LLM, finalize command, blueprint compiler with real model).
+3. PIL mascot frames + XP/achievements UI.
+4. Storage sync (rclone) with redacted config only.
+5. Whisplay daemon socket, button events, LED, LCD framebuffer; PiSugar battery poller; audio record/playback.
+6. Systemd unit, soak tests, real-hardware verification gates (no destructive commands without explicit user approval).
+
+## License
+
+TBD.

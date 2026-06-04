@@ -25,6 +25,15 @@ class FakeAgentPipeline:
 
     def ingest_fake_dump(self, title: str, audio_path: str) -> PipelineResult:
         dump_id = self.db.create_dump(title)
+        return self._populate(dump_id, title, audio_path)
+
+    def ingest_fake_into_dump(self, dump_id: int, audio_path: str) -> PipelineResult:
+        dump = self.db.get_dump(dump_id)
+        if dump is None:
+            raise ValueError(f"dump {dump_id} does not exist")
+        return self._populate(dump_id, dump.title, audio_path)
+
+    def _populate(self, dump_id: int, title: str, audio_path: str) -> PipelineResult:
         transcript = self.registry.stt["fake"].transcribe(audio_path)
         turn_id = self.db.add_turn(dump_id, "user", transcript, audio_path=audio_path)
         self.memory.remember(dump_id, "turn", turn_id, transcript)
