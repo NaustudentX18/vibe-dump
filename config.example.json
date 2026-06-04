@@ -1,0 +1,17 @@
+{
+  "data_dir": "data",
+  "database_path": "data/vibedump.sqlite3",
+  "providers": {
+    "stt": "fake",
+    "llm": "fake",
+    "tts": "fake"
+  },
+  "local_models": {
+    "llama_cpp_base_url": "http://100.127.91.97:8001/v1",
+    "ollama_base_url": "http://100.127.91.97:11434/v1"
+  },
+  "sync": {
+    "rclone_remote": "",
+    "redact_provider_config": true
+  }
+}
