@@ -39,3 +39,15 @@ def test_delete_dump_cascades_rows_and_fts(tmp_path):
     assert db.count("chunks") == 0
     assert db.search_chunks("searchable") == []
     db.close()
+
+
+def test_search_chunks_handles_literal_user_punctuation(tmp_path):
+    db = Database(tmp_path / "search.sqlite3")
+    db.initialize()
+    dump_id = db.create_dump("Natural Search")
+    turn_id = db.add_turn(dump_id, "user", "voice-first Pi Zero idea")
+    db.add_chunk(dump_id, "turn", turn_id, 0, "voice-first RAG memory for Pi Zero 2 W")
+
+    assert db.search_chunks("voice-first")[0]["dump_id"] == dump_id
+    assert db.search_chunks("???") == []
+    db.close()

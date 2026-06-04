@@ -7,6 +7,7 @@ should enqueue writes instead of blocking directly on this class.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from threading import RLock
 from typing import Any, Iterator
 
 SCHEMA_VERSION = 1
+FTS_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +232,9 @@ class Database:
             return int(cur.lastrowid)
 
     def search_chunks(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
+        fts_query = " ".join(FTS_TOKEN_RE.findall(query))
+        if not fts_query:
+            return []
         with self._lock:
             rows = self._conn.execute(
                 """
@@ -240,7 +245,7 @@ class Database:
                 ORDER BY score
                 LIMIT ?
                 """,
-                (query, limit),
+                (fts_query, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 

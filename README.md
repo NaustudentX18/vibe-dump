@@ -39,7 +39,7 @@ python -m pytest -q
 python -c "import vibedump; from vibedump.database import Database; from vibedump.ragmemory import RagMemory; print(vibedump.__version__)"
 ```
 
-Expected test result for this milestone: `6 passed`.
+Expected test result for this milestone: `7 passed`.
 
 ## Development notes
 
