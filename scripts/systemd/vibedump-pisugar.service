@@ -1,6 +1,6 @@
 [Unit]
 Description=VibeDump PiSugar battery poller
-Documentation=https://github.com/hermes-pi/vibe-dump
+Documentation=https://github.com/NaustudentX18/vibe-dump
 ConditionPathExists=/dev/i2c-1
 After=vibedump.service
 Wants=vibedump.service

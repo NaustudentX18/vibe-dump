@@ -162,10 +162,10 @@ for the pin map and assembly photos.
 | 1 | Raspberry Pi Zero 2 W | 512 MB RAM — stick to the `tiny` Whisper model and run STT on a desktop host if you need bigger models |
 | 1 | Waveshare Whisplay HAT | 240×280 ST7789 LCD + 4 buttons + WS2812 LED |
 | 1 | PiSugar 3 battery HAT | I2C telemetry, 5 V boost, optional UPS |
-| 1 | USB or 3.5 mm microphone | any ALSA-visible input works |
-| 1 | Speaker | 3.5 mm jack or the Whisplay's built-in piezo path |
+| 1 | USB microphone | the Pi Zero 2 W has no audio jack; a 3.5 mm lav + USB audio dongle also works |
+| 1 | USB or Bluetooth speaker | the Pi Zero 2 W has no audio jack |
 
-Power: a 5 V / 3 A USB-C supply is recommended for worst-case Whisper
+Power: a 5 V / 2.5 A micro-USB supply handles worst-case Whisper
 + Wi-Fi draws.
 
 ---

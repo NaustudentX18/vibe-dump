@@ -1,6 +1,6 @@
 [Unit]
 Description=VibeDump web dashboard
-Documentation=https://github.com/hermes-pi/vibe-dump
+Documentation=https://github.com/NaustudentX18/vibe-dump
 After=network-online.target
 Wants=network-online.target
 

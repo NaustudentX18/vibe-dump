@@ -14,7 +14,10 @@ from .base import ProviderHealth
 
 class WhisperSTT:
     name = "whisper"
-    default_model_size = "base.en"
+    # Pi Zero 2 W has 512 MB RAM; only `tiny.en` (~75 MB) fits. `base.en`
+    # (~150 MB) and `small.en` (~500 MB) overflow swap under STT load.
+    # Callers on a beefier host (e.g. desktop Ollama) should override.
+    default_model_size = "tiny.en"
     default_device = "cpu"
     default_compute_type = "int8"
 

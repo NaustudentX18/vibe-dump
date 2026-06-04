@@ -1,6 +1,6 @@
 [Unit]
 Description=VibeDump Whisplay display refresh daemon
-Documentation=https://github.com/hermes-pi/vibe-dump
+Documentation=https://github.com/NaustudentX18/vibe-dump
 ConditionPathExists=/dev/spidev0.0
 After=vibedump.service
 Wants=vibedump.service
