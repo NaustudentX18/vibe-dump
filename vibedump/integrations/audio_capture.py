@@ -36,8 +36,8 @@ class AudioCapture(Protocol):
 class ArecordCapture:
     """Real audio capture using the ALSA ``arecord`` CLI.
 
-    Records 16 kHz mono 16-bit WAV. Uses ``subprocess.run`` with a list
-    of args — never ``shell=True`` per project rules.
+    Records 16 kHz mono 16-bit WAV. Uses ``subprocess.Popen`` to run
+    so that it can be cancelled, but blocks the caller thread in ``record()``.
     """
 
     name = "arecord"
@@ -48,6 +48,9 @@ class ArecordCapture:
     def __init__(self) -> None:
         if shutil.which("arecord") is None:
             raise AudioCaptureNotAvailable("arecord not found on PATH")
+        self._lock = threading.Lock()
+        self._process: subprocess.Popen | None = None
+        self._cancelled = False
 
     def record(self, duration_s: float, output_path: str) -> str:
         args = [
@@ -59,18 +62,38 @@ class ArecordCapture:
             "-d", f"{duration_s:.3f}",
             output_path,
         ]
-        subprocess.run(args, check=True)
+        with self._lock:
+            self._cancelled = False
+            self._process = subprocess.Popen(args)
+
+        try:
+            retcode = self._process.wait()
+            if retcode != 0:
+                with self._lock:
+                    was_cancelled = self._cancelled
+                if not was_cancelled:
+                    raise subprocess.CalledProcessError(retcode, args)
+        finally:
+            with self._lock:
+                self._process = None
+
         return output_path
 
     def is_recording(self) -> bool:
-        # arecord is one-shot: subprocess.run blocks for the full duration.
-        # We don't expose sub-state; if you need cancellable capture, use
-        # the fake or wrap this class in a thread yourself.
-        return False
+        with self._lock:
+            if self._process is None:
+                return False
+            return self._process.poll() is None
 
     def cancel(self) -> None:
-        # No persistent subprocess to kill from here.
-        return None
+        with self._lock:
+            self._cancelled = True
+            if self._process is not None:
+                try:
+                    self._process.terminate()
+                except OSError:
+                    pass
+
 
 
 class FakeAudioCapture:

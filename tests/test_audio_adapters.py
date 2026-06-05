@@ -233,3 +233,129 @@ def test_whisper_fake_idempotent_for_any_path() -> None:
         out = stt.transcribe(path)
         assert isinstance(out, str)
         assert out
+
+
+# ---------------------------------------------------------------------------
+# 13. ArecordCapture: cancel() halts record() early & is_recording() works
+# ---------------------------------------------------------------------------
+
+
+class MockPopen:
+    def __init__(self, args):
+        self.args = args
+        self.returncode = None
+        self._wait_event = threading.Event()
+
+    def wait(self) -> int:
+        self._wait_event.wait()
+        return self.returncode if self.returncode is not None else 0
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.returncode = -15
+        self._wait_event.set()
+
+
+def test_arecord_capture_cancellation_and_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Mock arecord to be available on PATH
+    monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/arecord" if cmd == "arecord" else None)
+
+    popens = []
+    def mock_popen(args, **kwargs):
+        p = MockPopen(args)
+        popens.append(p)
+        return p
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", mock_popen)
+
+    cap = ArecordCapture()
+    output = str(tmp_path / "rec.wav")
+
+    started = threading.Event()
+    done = threading.Event()
+
+    def runner() -> None:
+        started.set()
+        cap.record(5.0, output)
+        done.set()
+
+    t = threading.Thread(target=runner)
+    t.start()
+    started.wait(timeout=1.0)
+
+    # Wait for popens list to be populated
+    time.sleep(0.05)
+
+    assert cap.is_recording() is True
+
+    cap.cancel()
+    t.join(timeout=2.0)
+
+    assert not t.is_alive(), "record() did not halt after cancel()"
+    assert cap.is_recording() is False
+
+
+def test_arecord_capture_runs_to_completion(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Mock arecord to be available on PATH
+    monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/arecord" if cmd == "arecord" else None)
+
+    class FastMockPopen:
+        def __init__(self, args):
+            self.args = args
+            self.returncode = 0
+
+        def wait(self) -> int:
+            return 0
+
+        def poll(self) -> int | None:
+            return 0
+
+        def terminate(self) -> None:
+            pass
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **kwargs: FastMockPopen(args))
+
+    cap = ArecordCapture()
+    output = str(tmp_path / "rec.wav")
+    assert cap.is_recording() is False
+    res = cap.record(0.1, output)
+    assert res == output
+    assert cap.is_recording() is False
+
+
+def test_arecord_capture_failure_raises_called_process_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Mock arecord to be available on PATH
+    monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/arecord" if cmd == "arecord" else None)
+
+    class FailMockPopen:
+        def __init__(self, args):
+            self.args = args
+            self.returncode = 1
+
+        def wait(self) -> int:
+            return 1
+
+        def poll(self) -> int | None:
+            return 1
+
+        def terminate(self) -> None:
+            pass
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "Popen", lambda args, **kwargs: FailMockPopen(args))
+
+    cap = ArecordCapture()
+    output = str(tmp_path / "rec.wav")
+    with pytest.raises(subprocess.CalledProcessError):
+        cap.record(0.1, output)
+
