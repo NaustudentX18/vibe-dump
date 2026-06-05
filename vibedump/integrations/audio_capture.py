@@ -45,23 +45,31 @@ class ArecordCapture:
     channels = DEFAULT_CHANNELS
     sample_width = DEFAULT_SAMPLE_WIDTH
 
-    def __init__(self) -> None:
+    def __init__(self, *, device: str | None = None) -> None:
         if shutil.which("arecord") is None:
             raise AudioCaptureNotAvailable("arecord not found on PATH")
+        self.device = device
         self._lock = threading.Lock()
         self._process: subprocess.Popen | None = None
         self._cancelled = False
 
     def record(self, duration_s: float, output_path: str) -> str:
-        args = [
-            "arecord",
-            "-q",
-            "-f", "S16_LE",
-            "-r", str(self.sample_rate),
-            "-c", str(self.channels),
-            "-d", f"{duration_s:.3f}",
-            output_path,
-        ]
+        args = ["arecord", "-q"]
+        if self.device:
+            args.extend(["-D", self.device])
+        args.extend(
+            [
+                "-f",
+                "S16_LE",
+                "-r",
+                str(self.sample_rate),
+                "-c",
+                str(self.channels),
+                "-d",
+                f"{duration_s:.3f}",
+                output_path,
+            ]
+        )
         with self._lock:
             self._cancelled = False
             self._process = subprocess.Popen(args)
@@ -176,7 +184,7 @@ def _arecord_bin_available() -> bool:
     )
 
 
-def make_audio_capture(prefer: str = "auto") -> AudioCapture:
+def make_audio_capture(prefer: str = "auto", *, device: str | None = None) -> AudioCapture:
     """Pick the best ``AudioCapture`` for this environment.
 
     - ``"arecord"`` — require arecord; raise ``AudioCaptureNotAvailable``
@@ -188,10 +196,10 @@ def make_audio_capture(prefer: str = "auto") -> AudioCapture:
     if prefer == "fake":
         return FakeAudioCapture()
     if prefer == "arecord":
-        return ArecordCapture()
+        return ArecordCapture(device=device)
     # auto
     if _arecord_bin_available():
-        return ArecordCapture()
+        return ArecordCapture(device=device)
     return FakeAudioCapture()
 
 

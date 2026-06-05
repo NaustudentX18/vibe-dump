@@ -138,8 +138,38 @@ else
   log "WARNING: $SPIDEV_PATH not present. A reboot may be required if SPI was just enabled."
 fi
 
+# ---------------------------------------------------------------------------
+# 7. PiSugar Whisplay audio drivers (WM8960 MEMS mics + onboard speaker)
+# ---------------------------------------------------------------------------
+WHISPLAY_DRIVER_REPO="${WHISPLAY_DRIVER_REPO:-https://github.com/PiSugar/Whisplay.git}"
+WHISPLAY_DRIVER_DIR="${WHISPLAY_DRIVER_DIR:-/opt/whisplay-driver}"
+
+if [[ "${VIBEDUMP_SKIP_WHISPLAY_AUDIO:-0}" != "1" ]]; then
+  if [[ -f "${WHISPLAY_DRIVER_DIR}/install_driver.sh" ]]; then
+    log "running existing Whisplay audio driver at ${WHISPLAY_DRIVER_DIR}"
+    bash "${WHISPLAY_DRIVER_DIR}/install_driver.sh" || log "WARNING: Whisplay audio driver install failed"
+  elif command -v git >/dev/null 2>&1; then
+    log "cloning PiSugar Whisplay driver for WM8960 audio (I2S)"
+    log "  repo: ${WHISPLAY_DRIVER_REPO}"
+    if [[ ! -d "${WHISPLAY_DRIVER_DIR}/.git" ]]; then
+      git clone --depth 1 "${WHISPLAY_DRIVER_REPO}" "${WHISPLAY_DRIVER_DIR}" || true
+    fi
+    if [[ -f "${WHISPLAY_DRIVER_DIR}/install_driver.sh" ]]; then
+      bash "${WHISPLAY_DRIVER_DIR}/install_driver.sh" || log "WARNING: Whisplay audio driver install failed"
+      log "reboot recommended after WM8960 overlay install"
+    else
+      log "WARNING: install_driver.sh not found in ${WHISPLAY_DRIVER_DIR}"
+    fi
+  else
+    log "git not found; skip Whisplay WM8960 audio driver (install manually from PiSugar/Whisplay)"
+  fi
+else
+  log "VIBEDUMP_SKIP_WHISPLAY_AUDIO=1 — skipping WM8960 driver install"
+fi
+
 log "Whisplay prerequisite install complete."
 log "Next steps:"
 log "  1. Log out and back in (so the spi/gpio group additions take effect)."
-log "  2. Optionally reboot: sudo reboot"
-log "  3. Verify with: python -c 'from vibedump.integrations.whisplay import RealWhisplayBridge; RealWhisplayBridge()'"
+log "  2. Reboot after WM8960 driver install: sudo reboot"
+log "  3. Verify SPI/LCD: python -c 'from vibedump.integrations.whisplay import RealWhisplayBridge; RealWhisplayBridge()'"
+log "  4. Verify audio: arecord -l && aplay -l  (expect wm8960 soundcard)"

@@ -69,7 +69,7 @@ def test_readme_has_quickstart() -> None:
 def test_readme_has_hardware_bom() -> None:
     text = _read(README)
     assert re.search(r"^##\s+Hardware BOM\s*$", text, re.MULTILINE), "no BOM heading"
-    for needle in ("Raspberry Pi Zero 2 W", "Whisplay", "PiSugar", "microphone", "Speaker"):
+    for needle in ("Raspberry Pi Zero 2 W", "Whisplay", "PiSugar", "WM8960", "speaker"):
         assert needle.lower() in text.lower(), f"BOM missing: {needle!r}"
 
 
@@ -133,7 +133,7 @@ def test_hardware_has_pin_map() -> None:
         "no Whisplay HAT pin map heading"
     )
     # Required pin map entries
-    for needle in ("SPI0 CE0", "GPIO25", "GPIO24", "ST7789", "WS2812"):
+    for needle in ("SPI0 CE0", "GPIO13", "GPIO24", "ST7789", "WS2812", "WM8960"):
         assert needle in text, f"pin map missing: {needle!r}"
 
 

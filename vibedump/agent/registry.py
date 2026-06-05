@@ -18,7 +18,7 @@ so the LLM gets a uniform failure shape.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from pydantic import ValidationError
 
@@ -69,10 +69,32 @@ class ToolRegistry:
         properties = input_schema.get("properties", {})
         required_fields = input_schema.get("required", [])
 
+        if any(k in input_schema for k in ("oneOf", "anyOf", "$ref")):
+            raise NotImplementedError(
+                "register_mcp_tool does not support oneOf/anyOf/$ref schemas yet; "
+                "use pydantic TypeAdapter for advanced MCP schemas"
+            )
+
         fields = {}
         for field_name, field_info in properties.items():
             json_type = field_info.get("type", "string")
-            if json_type == "string":
+            if isinstance(json_type, list):
+                non_null = [t for t in json_type if t != "null"]
+                if len(non_null) == 1 and "null" in json_type:
+                    json_type = non_null[0]
+                    nullable = True
+                else:
+                    raise NotImplementedError(
+                        f"unsupported union type for field {field_name!r}: {json_type}"
+                    )
+            else:
+                nullable = field_info.get("nullable", False)
+
+            if "enum" in field_info:
+                from typing import Literal
+
+                py_type = Literal[tuple(field_info["enum"])]  # type: ignore[valid-type]
+            elif json_type == "string":
                 py_type = str
             elif json_type == "integer":
                 py_type = int
@@ -86,6 +108,9 @@ class ToolRegistry:
                 py_type = dict
             else:
                 py_type = Any
+
+            if nullable and py_type is not Any:
+                py_type = py_type | None  # type: ignore[operator, assignment]
 
             field_desc = field_info.get("description", "")
             if field_name in required_fields:
