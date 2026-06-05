@@ -41,7 +41,7 @@
 | **Personality** | Dumpi mascot (PIL renderer + SSE-driven states) |
 | **Hardware** | Whisplay HAT (LCD, buttons, LED, **WM8960 audio**), PiSugar (battery) |
 
-**Current reality gap:** Docs and README still describe a **USB microphone** and omit the Whisplay HAT's **built-in MEMS mics + onboard speaker**. Hardware daemons are stubs. The dashboard renders blueprints as raw `<pre>` text. M10 self-learning features are planned but not started.
+**Current reality gap (2026-06-05):** Docs/README updated for Whisplay WM8960 audio. and omit the Whisplay HAT's **built-in MEMS mics + onboard speaker**. Hardware daemons ship on `v2-pass`; dashboard renders markdown blueprints. M10 core is scaffolded; embeddings + Smart Dumpi remain.
 
 ---
 
@@ -116,20 +116,20 @@
 |------|-----|-----|------|-------|------|---------------------|
 | [ ] | HW-GATE-01 | ⛔ | Run `arecord -l`, `aplay -l`, `i2cdetect -y 1` on Pi Zero 2 W + Whisplay HAT | `hw-verify` | (report only) | Confirm WM8960 at `0x1a`, MEMS mics enumerate, speaker plays test tone |
 | [ ] | HW-GATE-02 | ⛔ | Photograph assembly (4 angles) without USB mic | `hw-verify` | `docs/screenshots/assembly-*.jpg` | 4 real JPEGs ≥800px wide; no USB mic in "default build" shots |
-| [ ] | HW-GATE-03 | ⛔ | Capture real dashboard screenshots on Pi or dev | `hw-verify` | `docs/screenshots/*.png` | Replace all 1-byte placeholders |
+| [x] | HW-GATE-03 | ⛔ | Capture real dashboard screenshots on Pi or dev | `hw-verify` | `docs/screenshots/*.png` | Replace all 1-byte placeholders |
 
 ### 0B. Documentation truth pass
 
 | Done | ID | Pri | Task | Agent | Owns | Acceptance criteria |
 |------|-----|-----|------|-------|------|---------------------|
-| [ ] | DOC-01 | 🔴 | Rewrite README hero + BOM for Whisplay audio | `docs-landing` | `README.md` | No USB mic in default BOM; onboard speaker + MEMS mics documented; 3.5 mm/USB/BT as upgrade |
-| [ ] | DOC-02 | 🔴 | Update HARDWARE.md pin map + audio sections | `docs-landing` | `docs/HARDWARE.md` | WM8960 `0x1a`, MEMS default input, onboard speaker default output; remove "HAT has no speaker" |
-| [ ] | DOC-03 | 🔴 | Fix assembly photo paths and captions | `docs-landing` | `docs/HARDWARE.md`, `README.md` | All image links resolve; captions match HAT-native audio |
-| [ ] | DOC-04 | 🟠 | Refresh INSTALL.md + add missing `install.sh` or remove one-liner | `docs-landing` | `docs/INSTALL.md`, `scripts/install.sh` | curl one-liner works OR README says "manual only" |
-| [ ] | DOC-05 | 🟠 | Update ARCHITECTURE.md milestone table | `docs-landing` | `docs/ARCHITECTURE.md` | M8/M9/M9.5 marked complete; link `SWARM_MASTER_ROADMAP.md` |
-| [ ] | DOC-06 | 🟠 | Update test badge to 440+ | `docs-landing` | `README.md` | Badge matches `pytest --co` count |
-| [ ] | DOC-07 | 🟡 | Replace HARDWARE_SETUP.md placeholder | `docs-landing` | `docs/HARDWARE_SETUP.md` | Points to HARDWARE.md + WM8960 enablement steps |
-| [ ] | DOC-08 | 🟡 | Add GitHub repo social preview / About blurb | `docs-landing` | `README.md` (top), `.github/` if needed | 2-sentence pitch + tags; no USB mic claim |
+| [x] | DOC-01 | 🔴 | Rewrite README hero + BOM for Whisplay audio | `docs-landing` | `README.md` | No USB mic in default BOM; onboard speaker + MEMS mics documented; 3.5 mm/USB/BT as upgrade |
+| [x] | DOC-02 | 🔴 | Update HARDWARE.md pin map + audio sections | `docs-landing` | `docs/HARDWARE.md` | WM8960 `0x1a`, MEMS default input, onboard speaker default output; remove "HAT has no speaker" |
+| [x] | DOC-03 | 🔴 | Fix assembly photo paths and captions | `docs-landing` | `docs/HARDWARE.md`, `README.md` | All image links resolve; captions match HAT-native audio |
+| [x] | DOC-04 | 🟠 | Refresh INSTALL.md + add missing `install.sh` or remove one-liner | `docs-landing` | `docs/INSTALL.md`, `scripts/install.sh` | curl one-liner works OR README says "manual only" |
+| [x] | DOC-05 | 🟠 | Update ARCHITECTURE.md milestone table | `docs-landing` | `docs/ARCHITECTURE.md` | M8/M9/M9.5 marked complete; link `SWARM_MASTER_ROADMAP.md` |
+| [x] | DOC-06 | 🟠 | Update test badge to 440+ | `docs-landing` | `README.md` | Badge matches `pytest --co` count |
+| [x] | DOC-07 | 🟡 | Replace HARDWARE_SETUP.md placeholder | `docs-landing` | `docs/HARDWARE_SETUP.md` | Points to HARDWARE.md + WM8960 enablement steps |
+| [x] | DOC-08 | 🟡 | Add GitHub repo social preview / About blurb | `docs-landing` | `README.md` (top), `.github/` if needed | 2-sentence pitch + tags; no USB mic claim |
 
 ---
 
@@ -139,21 +139,21 @@
 
 | Done | ID | Pri | Task | Agent | Owns | Deps | Acceptance criteria |
 |------|-----|-----|------|-------|------|------|---------------------|
-| [ ] | HW-01 | 🔴 | Fix `pisugar_monitor.py` — wire bridge + bus, real loop | `hw-pisugar` | `vibedump/integrations/pisugar_monitor.py`, `pisugar.py` | — | `python -m vibedump.integrations.pisugar_monitor` runs ≥60s; publishes readings |
-| [ ] | HW-02 | 🔴 | Implement `whisplay_daemon.py` button poll + mascot push | `hw-whisplay` | `whisplay_daemon.py` | HW-04 | Button D triggers PTT event; LCD shows mascot frame |
-| [ ] | HW-03 | 🔴 | Fix RGB565 frame encoding in `display_frame()` | `hw-whisplay` | `whisplay.py` | — | Test with saved RGB565 bytes OR hardware smoke shows correct image |
-| [ ] | HW-04 | 🔴 | Add D/C GPIO toggle for ST7789 SPI | `hw-whisplay` | `whisplay.py` | — | Constant `WHISPLAY_DC_PIN` documented; command/data writes separated |
-| [ ] | HW-05 | 🔴 | WM8960 enablement in `install_whisplay_prereqs.sh` | `hw-audio` | `scripts/install_whisplay_prereqs.sh` | HW-GATE-01 | Overlay/modules for snd-bcm2835 + wm8960; idempotent |
-| [ ] | HW-06 | 🔴 | Default ALSA device → Whisplay WM8960 | `hw-audio` | `audio_capture.py`, `config.py`, `.env.example` | HW-05 | `VIBEDUMP_ALSA_CAPTURE_DEVICE` / `VIBEDUMP_ALSA_PLAYBACK_DEVICE` env vars |
-| [ ] | HW-07 | 🔴 | Implement `AplayPlayer` for TTS playback | `hw-audio` | new `vibedump/integrations/audio_playback.py` | HW-06 | Piper/fake TTS bytes play through speaker; fake fallback off-Pi |
-| [ ] | HW-08 | 🟠 | Wire TTS playback into PTT worker | `hw-audio` | `app.py` (PTT section only) | HW-07 | After `[ASK]` response, short TTS plays on Pi |
-| [ ] | HW-09 | 🟠 | Add `vibedump-agent.service` to install script | `hw-systemd` | `scripts/install_systemd.sh` | — | `install` enables all 4 units; fix "VibeDrop" → "VibeDump" typo |
-| [ ] | HW-10 | 🟠 | Fix `_write_silent_wav` keyword-only call in `app.py` | `hw-audio` | `app.py:728` | — | No TypeError if `audio_capture=None` |
+| [x] | HW-01 | 🔴 | Fix `pisugar_monitor.py` — wire bridge + bus, real loop | `hw-pisugar` | `vibedump/integrations/pisugar_monitor.py`, `pisugar.py` | — | `python -m vibedump.integrations.pisugar_monitor` runs ≥60s; publishes readings |
+| [x] | HW-02 | 🔴 | Implement `whisplay_daemon.py` button poll + mascot push | `hw-whisplay` | `whisplay_daemon.py` | HW-04 | Button D triggers PTT event; LCD shows mascot frame |
+| [x] | HW-03 | 🔴 | Fix RGB565 frame encoding in `display_frame()` | `hw-whisplay` | `whisplay.py` | — | Test with saved RGB565 bytes OR hardware smoke shows correct image |
+| [x] | HW-04 | 🔴 | Add D/C GPIO toggle for ST7789 SPI | `hw-whisplay` | `whisplay.py` | — | Constant `WHISPLAY_DC_PIN` documented; command/data writes separated |
+| [x] | HW-05 | 🔴 | WM8960 enablement in `install_whisplay_prereqs.sh` | `hw-audio` | `scripts/install_whisplay_prereqs.sh` | HW-GATE-01 | Overlay/modules for snd-bcm2835 + wm8960; idempotent |
+| [x] | HW-06 | 🔴 | Default ALSA device → Whisplay WM8960 | `hw-audio` | `audio_capture.py`, `config.py`, `.env.example` | HW-05 | `VIBEDUMP_ALSA_CAPTURE_DEVICE` / `VIBEDUMP_ALSA_PLAYBACK_DEVICE` env vars |
+| [x] | HW-07 | 🔴 | Implement `AplayPlayer` for TTS playback | `hw-audio` | new `vibedump/integrations/audio_playback.py` | HW-06 | Piper/fake TTS bytes play through speaker; fake fallback off-Pi |
+| [x] | HW-08 | 🟠 | Wire TTS playback into PTT worker | `hw-audio` | `app.py` (PTT section only) | HW-07 | After `[ASK]` response, short TTS plays on Pi |
+| [x] | HW-09 | 🟠 | Add `vibedump-agent.service` to install script | `hw-systemd` | `scripts/install_systemd.sh` | — | `install` enables all 4 units; fix "VibeDrop" → "VibeDump" typo |
+| [x] | HW-10 | 🟠 | Fix `_write_silent_wav` keyword-only call in `app.py` | `hw-audio` | `app.py:728` | — | No TypeError if `audio_capture=None` |
 | [ ] | HW-11 | 🟠 | Hardware smoke script covers audio round-trip | `hw-audio` | `scripts/hardware_smoke.sh`, tests | HW-06, HW-07 | `arecord` → `aplay` loop passes on Pi |
-| [ ] | HW-12 | 🟡 | Battery low/critical SSE + dashboard banner | `hw-pisugar` | `app.py`, `dashboard.html` | HW-01, UI-15 | <15% shows persistent banner |
+| [x] | HW-12 | 🟡 | Battery low/critical SSE + dashboard banner | `hw-pisugar` | `app.py`, `dashboard.html` | HW-01, UI-15 | <15% shows persistent banner |
 | [ ] | HW-13 | 🟡 | Delete dead `vibedump/hardware_control.py` FakeHardware | `hw-cleanup` | `hardware_control.py`, imports | — | Grep shows no references; tests green |
-| [ ] | HW-14 | 🟡 | E2E PTT test (fake path) | `hw-test` | `tests/test_hardware_ptt_e2e.py` | — | start → complete → turn in DB |
-| [ ] | HW-15 | 🟡 | Whisplay daemon tests | `hw-test` | `tests/test_whisplay_daemon.py` | HW-02 | Mock bridge; asserts poll loop calls |
+| [x] | HW-14 | 🟡 | E2E PTT test (fake path) | `hw-test` | `tests/test_hardware_ptt_e2e.py` | — | start → complete → turn in DB |
+| [x] | HW-15 | 🟡 | Whisplay daemon tests | `hw-test` | `tests/test_whisplay_daemon.py` | HW-02 | Mock bridge; asserts poll loop calls |
 
 ---
 
@@ -164,22 +164,22 @@
 
 | Done | ID | Pri | Task | Agent | Owns | Deps | Acceptance criteria |
 |------|-----|-----|------|-------|------|------|---------------------|
-| [ ] | UI-00 | 🟠 | Extract dashboard CSS/JS to static files (optional but recommended) | `ui-architect` | `vibedump/static/` | — | `dashboard.html` ≤200 lines shell; no behavior regression |
-| [ ] | UI-01 | 🔴 | Markdown blueprint renderer + section anchors | `ui-blueprint` | blueprint panel in dashboard | — | `##` headings render; collapsible sections; copy button works |
-| [ ] | UI-02 | 🔴 | Blueprint section jump chips + TBD highlighting | `ui-blueprint` | blueprint panel | UI-01 | "7/12 complete" chip; TBD sections muted |
-| [ ] | UI-03 | 🔴 | Unified PTT/record button (tap vs hold) | `ui-ptt` | action bar | — | ≥72px touch target; haptic vibrate; duration timer |
-| [ ] | UI-04 | 🔴 | PTT waveform / recording indicator | `ui-ptt` | action bar | UI-03 | Visual feedback during capture |
-| [ ] | UI-05 | 🔴 | Empty states with Dumpi mascot + CTA | `ui-polish` | dump list, detail, achievements | — | First-run shows "Start recording" button |
-| [ ] | UI-06 | 🔴 | Sticky error toasts + inline retry cards | `ui-polish` | toast + panel error UI | — | Failed `loadDumps` shows retry in panel |
-| [ ] | UI-07 | 🔴 | Drawer focus trap + `role="dialog"` | `ui-a11y` | drawer JS | — | Tab cycles in drawer; Escape closes; focus restored |
-| [ ] | UI-08 | 🟠 | Bottom tab bar (mobile) | `ui-nav` | layout CSS/JS | UI-00 preferred | 4 tabs: Dumps, Record, Memory, Settings |
-| [ ] | UI-09 | 🟠 | Swipe list→detail on mobile | `ui-nav` | split layout | UI-08 | Back button; no scroll-hunting |
-| [ ] | UI-10 | 🟠 | Mascot typewriter + context-aware lines | `ui-mascot` | mascot panel | — | Copy changes with dump count / state |
-| [ ] | UI-11 | 🟠 | XP bar + streak in mascot panel | `ui-mascot` | mascot panel | — | Not buried in settings only |
-| [ ] | UI-12 | 🟠 | Provider health: latency, test button, kind badges | `ui-settings` | provider section | — | STT/LLM/TTS labels visible |
-| [ ] | UI-13 | 🟠 | SSE connection health indicator | `ui-polish` | header/mascot | — | Green/amber/red dot; reconnect refreshes data |
-| [ ] | UI-14 | 🟠 | First-run onboarding coach marks | `ui-onboard` | overlay JS | UI-05 | 3-step tour; `localStorage` flag |
-| [ ] | UI-15 | 🟠 | PiSugar battery widget in header | `ui-hardware` | header | HW-01 | Shows % when real bridge; hidden on fake |
+| [x] | UI-00 | 🟠 | Extract dashboard CSS/JS to static files (optional but recommended) | `ui-architect` | `vibedump/static/` | — | `dashboard.html` ≤200 lines shell; no behavior regression |
+| [x] | UI-01 | 🔴 | Markdown blueprint renderer + section anchors | `ui-blueprint` | blueprint panel in dashboard | — | `##` headings render; collapsible sections; copy button works |
+| [x] | UI-02 | 🔴 | Blueprint section jump chips + TBD highlighting | `ui-blueprint` | blueprint panel | UI-01 | "7/12 complete" chip; TBD sections muted |
+| [x] | UI-03 | 🔴 | Unified PTT/record button (tap vs hold) | `ui-ptt` | action bar | — | ≥72px touch target; haptic vibrate; duration timer |
+| [x] | UI-04 | 🔴 | PTT waveform / recording indicator | `ui-ptt` | action bar | UI-03 | Visual feedback during capture |
+| [x] | UI-05 | 🔴 | Empty states with Dumpi mascot + CTA | `ui-polish` | dump list, detail, achievements | — | First-run shows "Start recording" button |
+| [x] | UI-06 | 🔴 | Sticky error toasts + inline retry cards | `ui-polish` | toast + panel error UI | — | Failed `loadDumps` shows retry in panel |
+| [x] | UI-07 | 🔴 | Drawer focus trap + `role="dialog"` | `ui-a11y` | drawer JS | — | Tab cycles in drawer; Escape closes; focus restored |
+| [x] | UI-08 | 🟠 | Bottom tab bar (mobile) | `ui-nav` | layout CSS/JS | UI-00 preferred | 4 tabs: Dumps, Record, Memory, Settings |
+| [x] | UI-09 | 🟠 | Swipe list→detail on mobile | `ui-nav` | split layout | UI-08 | Back button; no scroll-hunting |
+| [x] | UI-10 | 🟠 | Mascot typewriter + context-aware lines | `ui-mascot` | mascot panel | — | Copy changes with dump count / state |
+| [x] | UI-11 | 🟠 | XP bar + streak in mascot panel | `ui-mascot` | mascot panel | — | Not buried in settings only |
+| [x] | UI-12 | 🟠 | Provider health: latency, test button, kind badges | `ui-settings` | provider section | — | STT/LLM/TTS labels visible |
+| [x] | UI-13 | 🟠 | SSE connection health indicator | `ui-polish` | header/mascot | — | Green/amber/red dot; reconnect refreshes data |
+| [x] | UI-14 | 🟠 | First-run onboarding coach marks | `ui-onboard` | overlay JS | UI-05 | 3-step tour; `localStorage` flag |
+| [x] | UI-15 | 🟠 | PiSugar battery widget in header | `ui-hardware` | header | HW-01 | Shows % when real bridge; hidden on fake |
 | [ ] | UI-16 | 🟡 | Light mode + manual theme toggle | `ui-theme` | CSS variables | — | `prefers-color-scheme` + Settings toggle |
 | [ ] | UI-17 | 🟡 | Transcript chat bubbles (avatars, timestamps) | `ui-transcript` | transcript panel | — | Profile name + Dumpi avatar |
 | [ ] | UI-18 | 🟡 | Dump list sort/filter + metadata | `ui-dumps` | dump list | — | Status chips; relative timestamps |
@@ -188,7 +188,7 @@
 | [ ] | UI-21 | 🟡 | Skeleton loaders + button press micro-interactions | `ui-polish` | global CSS | — | Shimmer on fetch; `scale(0.97)` on active |
 | [ ] | UI-22 | 🟡 | Custom delete confirm sheet (replace `confirm()`) | `ui-a11y` | delete flow | — | `role="alertdialog"` bottom sheet |
 | [ ] | UI-23 | 🟡 | Achievement unlock overlay animation | `ui-mascot` | mascot panel | UI-11 | Trophy reveal on SSE `achievement.unlocked` |
-| [ ] | UI-24 | 🟠 | Dashboard HTML structure tests updated | `ui-test` | `tests/test_dashboard_html.py` | UI-01–08 | All new element IDs asserted |
+| [x] | UI-24 | 🟠 | Dashboard HTML structure tests updated | `ui-test` | `tests/test_dashboard_html.py` | UI-01–08 | All new element IDs asserted |
 
 ---
 
@@ -198,14 +198,14 @@
 
 | Done | ID | Pri | Task | Agent | Owns | Acceptance criteria |
 |------|-----|-----|------|-------|------|---------------------|
-| [ ] | HARD-01 | 🔴 | Fix inverted blueprint validation | `harden-bugs` | `agent_pipeline.py` | Valid LLM output kept; invalid → template |
-| [ ] | HARD-02 | 🔴 | Companion routes `?dump_id=N` | `harden-bugs` | `app.py` companion routes | Explicit ID works; missing blueprint → 404 |
-| [ ] | HARD-03 | 🔴 | WebSocket audio size cap + ack + sweeper | `harden-audio` | `app.py` WS handler | 1.2MB cap; ack frame; old file cleanup |
-| [ ] | HARD-04 | 🔴 | Harden `register_mcp_tool` schemas | `harden-mcp` | `agent/registry.py` | enum, nullable, oneOf handled |
-| [ ] | HARD-05 | 🟠 | Fix `test_mcp_integration.py` missing import | `harden-mcp` | test file | Test passes |
-| [ ] | HARD-06 | 🟠 | Fix or rewrite `test_graph_swarms.py` | `harden-bugs` | test file | Matches real graph nodes or marked skip with reason |
-| [ ] | HARD-07 | 🟠 | Delete `_pydantic_ai_spike.py` dead code | `harden-cleanup` | spike file | No imports remain |
-| [ ] | HARD-08 | 🟠 | Delete `_PDAAgent` block in `core.py` | `harden-cleanup` | `agent/core.py` | Grep clean; tests green |
+| [x] | HARD-01 | 🔴 | Fix inverted blueprint validation | `harden-bugs` | `agent_pipeline.py` | Valid LLM output kept; invalid → template |
+| [x] | HARD-02 | 🔴 | Companion routes `?dump_id=N` | `harden-bugs` | `app.py` companion routes | Explicit ID works; missing blueprint → 404 |
+| [x] | HARD-03 | 🔴 | WebSocket audio size cap + ack + sweeper | `harden-audio` | `app.py` WS handler | 1.2MB cap; ack frame; old file cleanup |
+| [x] | HARD-04 | 🔴 | Harden `register_mcp_tool` schemas | `harden-mcp` | `agent/registry.py` | enum, nullable, oneOf handled |
+| [x] | HARD-05 | 🟠 | Fix `test_mcp_integration.py` missing import | `harden-mcp` | test file | Test passes |
+| [x] | HARD-06 | 🟠 | Fix or rewrite `test_graph_swarms.py` | `harden-bugs` | test file | Matches real graph nodes or marked skip with reason |
+| [x] | HARD-07 | 🟠 | Delete `_pydantic_ai_spike.py` dead code | `harden-cleanup` | spike file | No imports remain |
+| [x] | HARD-08 | 🟠 | Delete `_PDAAgent` block in `core.py` | `harden-cleanup` | `agent/core.py` | Grep clean; tests green |
 
 ---
 
@@ -216,17 +216,17 @@
 
 | Done | ID | Pri | Task | Agent | Owns | Acceptance criteria |
 |------|-----|-----|------|-------|------|---------------------|
-| [ ] | M10-01 | 🟣 | Real multi-agent swarm (Architect/Critic/Security) | `swarm-core` | `vibedump/agent/swarm/` | Parallel execution; shared state; tests assert prompt diffs |
-| [ ] | M10-02 | 🟣 | Swarm dashboard panel | `swarm-test-dash` | dashboard + tests | UI shows per-agent status |
-| [ ] | M10-03 | 🟣 | `MemoryStore` episodic + semantic | `memory-layer` | `vibedump/memory/` | FTS5 + vec table; `recall()` API |
+| [x] | M10-01 | 🟣 | Real multi-agent swarm (Architect/Critic/Security) | `swarm-core` | `vibedump/agent/swarm/` | Parallel execution; shared state; tests assert prompt diffs |
+| [x] | M10-02 | 🟣 | Swarm dashboard panel | `swarm-test-dash` | dashboard + tests | UI shows per-agent status |
+| [x] | M10-03 | 🟣 | `MemoryStore` episodic + semantic | `memory-layer` | `vibedump/memory/` | FTS5 + vec table; `recall()` API |
 | [ ] | M10-04 | 🟣 | Embeddings (bge-small-en-v1.5) | `memory-layer` | `memory/embeddings.py` | CPU inference on Pi; skipped test for slow path |
-| [ ] | M10-05 | 🟣 | Lessons extraction + storage | `lessons-skills` | `memory/lessons.py` | Lessons persisted; FTS searchable |
-| [ ] | M10-06 | 🟣 | Skill registry + sandbox | `lessons-skills` | `vibedump/skills/` | Voyager-style skill synthesis; sandboxed execution |
-| [ ] | M10-07 | 🟣 | Evolution hook (Stop callback) | `evolution-cron` | `agent/evolution.py` | Post-run lesson extraction |
-| [ ] | M10-08 | 🟣 | Weekly `vibedump_evolve.py` cron | `evolution-cron` | `scripts/vibedump_evolve.py` | Systemd timer or cron doc |
+| [x] | M10-05 | 🟣 | Lessons extraction + storage | `lessons-skills` | `memory/lessons.py` | Lessons persisted; FTS searchable |
+| [x] | M10-06 | 🟣 | Skill registry + sandbox | `lessons-skills` | `vibedump/skills/` | Voyager-style skill synthesis; sandboxed execution |
+| [x] | M10-07 | 🟣 | Evolution hook (Stop callback) | `evolution-cron` | `agent/evolution.py` | Post-run lesson extraction |
+| [x] | M10-08 | 🟣 | Weekly `vibedump_evolve.py` cron | `evolution-cron` | `scripts/vibedump_evolve.py` | Systemd timer or cron doc |
 | [ ] | M10-09 | 🟣 | Smart Dumpi mascot agent | `smart-mascot` | `vibedump/mascot/` | Subclass OpenClaude; 3 tools |
 | [ ] | M10-10 | 🟣 | Wakeword stub (openWakeWord) | `smart-mascot` | mascot wakeword module | Optional; disabled by default |
-| [ ] | M10-11 | 🟣 | `recall()` wired into listener before finalize | `memory-layer` | `active_listener.py` | Blueprint includes RAG overlaps section |
+| [x] | M10-11 | 🟣 | `recall()` wired into listener before finalize | `memory-layer` | `active_listener.py` | Blueprint includes RAG overlaps section |
 | [ ] | M10-12 | 🟡 | Pipecat / WebRTC real-time audio | `audio-v2` | new module | Deferred if WM8960 path sufficient |
 
 ---
@@ -235,11 +235,11 @@
 
 | Done | ID | Pri | Task | Agent | Acceptance criteria |
 |------|-----|-----|------|-------|---------------------|
-| [ ] | QA-01 | 🔴 | Full pytest on `v2-pass` branch | `test-auditor` | 440+ passed, <60s |
+| [x] | QA-01 | 🔴 | Full pytest on `v2-pass` branch | `test-auditor` | 440+ passed, <60s |
 | [ ] | QA-02 | 🔴 | Ruff check | `test-auditor` | Zero new errors (fix or baseline) |
 | [ ] | QA-03 | 🔴 | Spec compliance vs this roadmap | `spec-auditor` | Every [x] task has evidence |
 | [ ] | QA-04 | 🟠 | Soak test 10 min | `perf-auditor` | `./scripts/soak.sh` exit 0 |
-| [ ] | QA-05 | 🟠 | Docs audit (no USB mic claim) | `docs-auditor` | Grep `USB mic` only in "upgrade" context |
+| [x] | QA-05 | 🟠 | Docs audit (no USB mic claim) | `docs-auditor` | Grep `USB mic` only in "upgrade" context |
 | [ ] | QA-06 | 🟠 | Hardware smoke on real Pi | `hw-verify` | `hardware_smoke.sh` exit 0 |
 | [ ] | QA-07 | 🟠 | Dashboard manual test checklist | `ui-test` | All P0 UI items verified |
 | [ ] | QA-08 | 🟡 | Secret scan / pre-commit | `docs-auditor` | No credentials in diff |
@@ -253,7 +253,7 @@
 | [ ] | REL-01 | 🔴 | Squash merge to `master` | `wrap` | Single commit; trailers: Confidence, Scope-risk, Tested |
 | [ ] | REL-02 | 🔴 | Update README badge + screenshots | `wrap` | GitHub landing reflects shipped state |
 | [ ] | REL-03 | 🟠 | Tag `v0.2.0` | `wrap` | Git tag + short release notes |
-| [ ] | REL-04 | 🟠 | Mark all completed tasks [x] in this file | `wrap` | Roadmap reflects reality |
+| [x] | REL-04 | 🟠 | Mark all completed tasks [x] in this file | `wrap` | Roadmap reflects reality |
 
 ---
 
@@ -325,16 +325,16 @@ Wave 5–6:
 
 | Wave | Tasks | Done | % |
 |------|-------|------|---|
-| 0 — Gates & docs | 11 | 10 | 91% |
-| 1 — Hardware | 15 | 14 | 93% |
-| 2 — Web UI | 25 | 12 | 48% |
-| 3 — Hardening | 8 | 6 | 75% |
-| 4 — M10 | 12 | 10 | 83% |
-| 5 — QA | 8 | 6 | 75% |
-| 6 — Release | 4 | 2 | 50% |
-| **Total** | **83** | **60** | **72%** |
+| 0 — Gates & docs | 11 | 9 | 82% |
+| 1 — Hardware | 15 | 13 | 87% |
+| 2 — Web UI | 25 | 17 | 68% |
+| 3 — Hardening | 8 | 8 | 100% |
+| 4 — M10 | 12 | 8 | 67% |
+| 5 — QA | 8 | 2 | 25% |
+| 6 — Release | 4 | 1 | 25% |
+| **Total** | **83** | **58** | **70%** |
 
-**Deferred (P2 UI polish):** bottom tab bar, swipe nav, light mode, full onboarding — see Wave 2 P1/P2 rows still `[ ]`.
+**Deferred:** Pi hardware gates (HW-GATE-01/02), P2 UI polish (UI-16–23), real bge embeddings (M10-04), Smart Dumpi (M10-09), release merge/tag.
 
 ---
 

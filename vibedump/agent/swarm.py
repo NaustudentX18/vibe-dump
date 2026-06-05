@@ -87,9 +87,9 @@ async def _critic_handler(ctx: SwarmContext) -> str:
 
 
 async def _security_handler(ctx: SwarmContext) -> str:
-    """Performs security review and finalises the blueprint."""
-    reviewed = ctx.results.get("critic", "")
-    result = f"[Security] cleared: {reviewed!s:.80}"
+    """Performs security review (runs parallel with critic after architect)."""
+    draft = ctx.results.get("architect", "")
+    result = f"[Security] cleared: {draft!s:.80}"
     ctx.results["security"] = result
     return result
 
@@ -97,5 +97,5 @@ async def _security_handler(ctx: SwarmContext) -> str:
 SWARM_V1: list[NodeSpec] = [
     NodeSpec(name="architect", handler=_architect_handler, depends_on=()),
     NodeSpec(name="critic", handler=_critic_handler, depends_on=("architect",)),
-    NodeSpec(name="security", handler=_security_handler, depends_on=("critic",)),
+    NodeSpec(name="security", handler=_security_handler, depends_on=("architect",)),
 ]

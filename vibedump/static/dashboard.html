@@ -8,6 +8,11 @@
   <link rel="stylesheet" href="/static/dashboard.css" />
 </head>
 <body>
+  <!-- HW-12: Low battery fixed banner -->
+  <div id="lowBatteryBanner" class="low-battery-banner" hidden role="alert">
+    🪫 Low battery — please charge soon
+  </div>
+
   <header class="app-header">
     <button class="icon-btn" id="menuBtn" aria-label="Open menu">☰</button>
     <div class="app-title">
@@ -164,6 +169,14 @@
         <div class="empty">No agent runs yet.</div>
       </div>
     </details>
+
+    <!-- M10-02: Collapsible Swarm panel -->
+    <details class="field" id="swarmPanel">
+      <summary style="cursor:pointer; font-weight:600;">🐝 Swarm</summary>
+      <div id="swarmNodeList" class="dump-list" style="max-height:25vh; margin-top:6px;">
+        <div class="empty">No swarm activity yet.</div>
+      </div>
+    </details>
   </aside>
 
   <main class="app-main">
@@ -174,6 +187,11 @@
       <div class="mascot-meta">
         <h1 id="mascotHeading">Hi, I'm Dumpi 👋</h1>
         <p id="mascotLine">Tap record to dump your next messy idea.</p>
+        <!-- UI-11: XP bar + streak in mascot panel -->
+        <div class="mascot-xp" id="mascotXp" hidden>
+          <div class="xp-bar mascot-xp-bar"><div class="xp-fill" id="mascotXpFill"></div></div>
+          <span class="mascot-streak" id="mascotStreak"></span>
+        </div>
       </div>
       <span class="status-chip" id="statusChip" data-state="idle">Idle</span>
     </section>
@@ -194,14 +212,66 @@
     </section>
   </main>
 
+  <!-- UI-03/04: pttHoldBtn is the primary action; recordBtn demoted/hidden -->
   <div class="action-bar" role="toolbar" aria-label="Quick actions">
     <button class="btn" id="navSearchBtn" aria-label="Search">🔍</button>
-    <button class="record-btn" id="recordBtn" aria-label="Record">🎙</button>
-    <button class="btn" id="pttHoldBtn" aria-label="Hold to talk" aria-pressed="false">🎙 Hold to talk</button>
+    <button class="record-btn" id="recordBtn" aria-label="Record" hidden>🎙</button>
+    <button class="btn ptt-primary" id="pttHoldBtn" aria-label="Hold to talk" aria-pressed="false">
+      <span class="ptt-bars" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></span>
+      <span class="ptt-label">🎙 Hold to talk</span>
+      <span class="ptt-timer" id="pttTimer" hidden>0:00</span>
+    </button>
     <button class="btn" id="navSettingsBtn" aria-label="Settings">⚙️</button>
   </div>
 
+  <!-- UI-08: Bottom tab bar -->
+  <nav class="bottom-tab-bar" id="bottomTabBar" aria-label="Main navigation tabs">
+    <button class="tab-btn is-active" id="tabDumps" data-tab="dumps" type="button">
+      <span class="tab-icon">📚</span><span class="tab-label">Dumps</span>
+    </button>
+    <button class="tab-btn tab-btn--record" id="tabRecord" data-tab="record" type="button" aria-pressed="false">
+      <span class="tab-icon">🎙</span><span class="tab-label">Record</span>
+    </button>
+    <button class="tab-btn" id="tabSearch" data-tab="search" type="button">
+      <span class="tab-icon">🔍</span><span class="tab-label">Search</span>
+    </button>
+    <button class="tab-btn" id="tabSettings" data-tab="settings" type="button">
+      <span class="tab-icon">⚙️</span><span class="tab-label">Settings</span>
+    </button>
+  </nav>
+
   <div class="event-log" id="eventLog" aria-live="polite"></div>
+
+  <!-- UI-14: First-run onboarding overlay -->
+  <div id="onboardingOverlay" class="onboarding-overlay" hidden role="dialog" aria-modal="true" aria-label="Welcome to Vibe-Dump">
+    <div class="onboarding-card">
+      <div class="onboarding-step" id="onboardingStep0">
+        <div class="onboarding-emoji">🎙</div>
+        <h2>Dump your ideas</h2>
+        <p>Hold the mic button and speak freely. No filters needed.</p>
+      </div>
+      <div class="onboarding-step" id="onboardingStep1" hidden>
+        <div class="onboarding-emoji">💎</div>
+        <h2>AI builds your spec</h2>
+        <p>Vibe-Dump turns your ramble into a structured blueprint in seconds.</p>
+      </div>
+      <div class="onboarding-step" id="onboardingStep2" hidden>
+        <div class="onboarding-emoji">🚀</div>
+        <h2>Ship it</h2>
+        <p>Copy your blueprint and start building. Your Dumpi is ready when you are.</p>
+      </div>
+      <div class="onboarding-dots" id="onboardingDots">
+        <span class="onboarding-dot is-active"></span>
+        <span class="onboarding-dot"></span>
+        <span class="onboarding-dot"></span>
+      </div>
+      <div class="onboarding-nav">
+        <button class="btn" id="onboardingPrev" type="button" hidden>← Back</button>
+        <button class="btn primary" id="onboardingNext" type="button">Next →</button>
+        <button class="btn primary" id="onboardingDone" type="button" hidden>Let's go 🚀</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/dashboard.js"></script>
 </body>

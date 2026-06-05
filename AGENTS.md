@@ -20,7 +20,7 @@ See `README.md` and `docs/INSTALL.md` for canonical setup. Quick reference:
 
 ```bash
 source .venv/bin/activate
-python -m pytest          # 440 tests; install Pillow for mascot suite
+python -m pytest          # 512+ tests; install Pillow for mascot suite
 python -m ruff check vibedump tests   # ruff not pinned in pyproject; install separately
 ./scripts/run_dev.sh      # dashboard at http://127.0.0.1:8080
 ```

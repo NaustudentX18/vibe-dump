@@ -39,16 +39,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from .tools import ToolDefinition
     from ..events import EventBus
 
-# pydantic-deep-agents: best-effort import. We do not depend on it at
-# runtime; when present we record the fact, but the inline tool-use
-# loop is the canonical implementation and works without it.
-try:  # pragma: no cover - presence is environment-dependent
-    from pydantic_deep_agents import Agent as _PDAAgent  # type: ignore[import-not-found]
-    _HAS_PYDANTIC_DEEP_AGENTS = True
-except ImportError:  # pragma: no cover - exercised via monkeypatch
-    _PDAAgent = None  # type: ignore[assignment]
-    _HAS_PYDANTIC_DEEP_AGENTS = False
-
 # pydantic-ai: best-effort import. When present the M9.5 backend can
 # be selected; when absent we keep using the inline tool-use loop.
 try:  # pragma: no cover - presence is environment-dependent

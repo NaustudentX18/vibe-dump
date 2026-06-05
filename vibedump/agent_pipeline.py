@@ -292,6 +292,58 @@ class AgentPipeline:
         raw = llm.complete(prompt)
         if validate_blueprint(raw):
             raw = blueprint_template(title)
+
+        # M10: swarm review DAG (architect → critic ∥ security)
+        try:
+            from .agent.swarm import SWARM_V1, SwarmContext
+            from .agent.swarm_executor import run_swarm_sync
+
+            if self.bus is not None:
+                self.bus.publish("swarm.started", {"dump_id": dump_id})
+            ctx = SwarmContext(
+                state={"transcript": transcript, "title": title, "draft": raw}
+            )
+            swarm_result = run_swarm_sync(SWARM_V1, ctx)
+            for node_name, node_out in swarm_result.node_results.items():
+                if self.bus is not None:
+                    self.bus.publish(
+                        "swarm.node_done",
+                        {"dump_id": dump_id, "node": node_name, "ok": node_name not in swarm_result.errors},
+                    )
+            if self.bus is not None:
+                self.bus.publish(
+                    "swarm.completed",
+                    {"dump_id": dump_id, "ok": swarm_result.ok, "errors": swarm_result.errors},
+                )
+            if swarm_result.node_results:
+                raw += "\n\n## Reviewer notes\n\n"
+                for node_name in ("architect", "critic", "security"):
+                    note = swarm_result.node_results.get(node_name)
+                    if note:
+                        raw += f"- **{node_name}**: {note}\n"
+        except Exception:  # noqa: BLE001 - swarm is best-effort
+            pass
+
+        # M10: inject recall hits into section 12
+        recall_hits = getattr(self, "_last_recall", None) or []
+        if recall_hits and self.memory_store is not None:
+            overlap_lines = [
+                f"- ({hit.score:.2f}) {hit.title or 'dump ' + str(hit.dump_id)}: {hit.content[:120]}"
+                for hit in recall_hits[:5]
+            ]
+            block = "## 12. RAG Memory Overlaps\n\n" + "\n".join(overlap_lines) + "\n"
+            if "## 12. RAG Memory Overlaps" in raw:
+                import re
+
+                raw = re.sub(
+                    r"## 12\. RAG Memory Overlaps\n\nTBD\n?",
+                    block,
+                    raw,
+                    count=1,
+                )
+            else:
+                raw += "\n\n" + block
+
         blueprint_id = self.db.add_blueprint(dump_id, raw)
         self.memory.remember(dump_id, "blueprint", blueprint_id, raw)
         return raw

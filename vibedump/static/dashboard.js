@@ -14,6 +14,8 @@ const state = {
   pttJobId: null,
   pttPollTimer: null,
   traceRuns: [],
+  pttTimerInterval: null,
+  pttTimerStart: null,
 };
 
 const API = {
@@ -163,6 +165,44 @@ function renderMarkdown(md) {
   closeList();
   if (inCode) html += escHtml(codeBuffer) + "</code></pre>";
   return html;
+}
+
+// ---------------------------------------------------------------------------
+// UI-02: Section chips — horizontal scrollable TOC from ## headings
+// ---------------------------------------------------------------------------
+
+function buildSectionChips(md, mdBodyEl) {
+  const sections = [];
+  for (const line of md.split("\n")) {
+    const m = line.match(/^## (.+)/);
+    if (m) sections.push(m[1]);
+  }
+  if (!sections.length) return null;
+
+  const wrap = document.createElement("div");
+  wrap.className = "section-chips";
+
+  const countChip = document.createElement("span");
+  countChip.className = "section-chip section-chip--count";
+  countChip.textContent = `${sections.length}/12 sections`;
+  wrap.appendChild(countChip);
+
+  for (const title of sections) {
+    const chip = document.createElement("button");
+    chip.className = "section-chip";
+    chip.type = "button";
+    chip.textContent = title;
+    if (/\bTBD\b/i.test(title)) chip.classList.add("section-chip--muted");
+    chip.addEventListener("click", () => {
+      if (!mdBodyEl) return;
+      const hs = Array.from(mdBodyEl.querySelectorAll(".md-body h2"));
+      const stripped = title.replace(/^\d+\.\s*/, "").toLowerCase();
+      const target = hs.find((h) => h.textContent.toLowerCase().includes(stripped));
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    wrap.appendChild(chip);
+  }
+  return wrap;
 }
 
 // ---------------------------------------------------------------------------
@@ -344,9 +384,17 @@ function renderDumps() {
 }
 
 async function loadDumps() {
-  const data = await api(API.dumps);
-  state.dumps = data.items;
-  renderDumps();
+  const list = $("#dumpList");
+  try {
+    const data = await api(API.dumps);
+    state.dumps = data.items;
+    renderDumps();
+  } catch (e) {
+    list.innerHTML = "";
+    const errDiv = createEmptyState(`Failed to load dumps: ${e.message}`, "↻ Retry", loadDumps);
+    errDiv.querySelector("button").id = "dumpsRetryBtn";
+    list.appendChild(errDiv);
+  }
 }
 
 async function selectDump(id) {
@@ -368,6 +416,23 @@ async function selectDump(id) {
 
 function renderDumpDetail(root, turnsRes, blueprintRes) {
   root.innerHTML = "";
+
+  // UI-09: back button shown on mobile (<900px)
+  const backBtn = document.createElement("button");
+  backBtn.className = "btn detail-back-btn";
+  backBtn.id = "detailBackBtn";
+  backBtn.type = "button";
+  backBtn.textContent = "← Back";
+  backBtn.addEventListener("click", () => {
+    if (window.innerWidth < 900) {
+      state.selectedId = null;
+      renderDumps();
+      root.className = "empty";
+      root.textContent = "Pick a dump to see transcript + blueprint.";
+    }
+  });
+  root.appendChild(backBtn);
+
   const transcript = document.createElement("div");
   transcript.className = "transcript-list";
   const transcriptHeading = document.createElement("h3");
@@ -410,6 +475,9 @@ function renderDumpDetail(root, turnsRes, blueprintRes) {
     const mdDiv = document.createElement("div");
     mdDiv.className = "md-body";
     mdDiv.innerHTML = renderMarkdown(blueprintRes.markdown);
+    // UI-02: section chips before the markdown body
+    const chips = buildSectionChips(blueprintRes.markdown, mdDiv);
+    if (chips) bp.appendChild(chips);
     bp.appendChild(mdDiv);
     const copyBtn = document.createElement("button");
     copyBtn.className = "btn";
@@ -461,11 +529,16 @@ async function loadProviders() {
     return;
   }
   nav.textContent = `${data.health.length} providers loaded`;
+  // UI-12: build name→config map for kind badge
+  const configMap = {};
+  for (const c of (data.configs || [])) configMap[c.name] = c;
   for (const h of data.health) {
     const row = document.createElement("div");
     row.className = "health-row";
     row.dataset.ok = String(h.ok);
-    row.innerHTML = `<span class="health-dot"></span><span class="name"></span><span class="detail"></span>`;
+    const kind = (configMap[h.name] && configMap[h.name].kind) || "";
+    const statusText = h.ok ? "ok" : "error";
+    row.innerHTML = `<span class="health-dot"></span>${kind ? `<span class="kind-badge kind-badge--${kind}">${kind.toUpperCase()}</span>` : ""}<span class="name"></span><span class="health-status health-status--${statusText}">${statusText}</span><span class="detail"></span>`;
     row.querySelector(".name").textContent = h.name;
     row.querySelector(".detail").textContent = h.detail || "";
     list.appendChild(row);
@@ -496,6 +569,15 @@ function renderProfile() {
   const info = $("#xpInfo");
   if (info) {
     info.textContent = `Lvl ${p.level} · ${p.xp} XP · ${p.xp_to_next_level} to next · 🔥 ${p.streak_days}d streak`;
+  }
+  // UI-11: mascot panel XP bar + streak
+  const mascotXp = $("#mascotXp");
+  const mascotXpFill = $("#mascotXpFill");
+  const mascotStreak = $("#mascotStreak");
+  if (mascotXp) {
+    if (mascotXpFill) mascotXpFill.style.width = `${xpInLevel}%`;
+    if (mascotStreak) mascotStreak.textContent = `🔥 ${p.streak_days}d streak`;
+    mascotXp.hidden = false;
   }
 }
 
@@ -719,6 +801,7 @@ function connectSSE() {
       showToast("🎙 PTT captured nothing");
     }
     stopPttPolling();
+    stopPttTimer();
     state.pttJobId = null;
     const pttBtn = $("#pttHoldBtn");
     if (pttBtn) {
@@ -781,6 +864,27 @@ function connectSSE() {
       // Telemetry is best-effort; never break SSE handling.
     }
   });
+  // M10-02: Swarm events
+  es.addEventListener("swarm.started", (e) => {
+    try {
+      const data = JSON.parse(e.data).payload || {};
+      showToast(`🐝 Swarm ${(data.swarm_id || "").slice(0, 8)} started`);
+      renderSwarmNode({ type: "started", ...data });
+    } catch (_) {}
+  });
+  es.addEventListener("swarm.node_done", (e) => {
+    try {
+      const data = JSON.parse(e.data).payload || {};
+      renderSwarmNode({ type: "node_done", ...data });
+    } catch (_) {}
+  });
+  es.addEventListener("swarm.completed", (e) => {
+    try {
+      const data = JSON.parse(e.data).payload || {};
+      showToast("🐝 Swarm completed");
+      renderSwarmNode({ type: "completed", ...data });
+    } catch (_) {}
+  });
   es.onerror = () => {
     setSSEStatus("error");
     setTimeout(connectSSE, 3000);
@@ -792,6 +896,31 @@ function stopPttPolling() {
     clearInterval(state.pttPollTimer);
     state.pttPollTimer = null;
   }
+}
+
+// UI-03/04: Recording timer helpers
+function startPttTimer() {
+  stopPttTimer();
+  state.pttTimerStart = Date.now();
+  const timerEl = $("#pttTimer");
+  if (timerEl) timerEl.hidden = false;
+  state.pttTimerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - state.pttTimerStart) / 1000);
+    const m = Math.floor(elapsed / 60);
+    const s = elapsed % 60;
+    const el = $("#pttTimer");
+    if (el) el.textContent = `${m}:${String(s).padStart(2, "0")}`;
+  }, 250);
+}
+
+function stopPttTimer() {
+  if (state.pttTimerInterval) {
+    clearInterval(state.pttTimerInterval);
+    state.pttTimerInterval = null;
+  }
+  state.pttTimerStart = null;
+  const timerEl = $("#pttTimer");
+  if (timerEl) timerEl.hidden = true;
 }
 
 function startPttPolling(jobId) {
@@ -809,6 +938,7 @@ function startPttPolling(jobId) {
         } else {
           showToast("🎙 PTT captured nothing");
         }
+        stopPttTimer();
         state.pttJobId = null;
         const pttBtn = $("#pttHoldBtn");
         if (pttBtn) {
@@ -819,6 +949,7 @@ function startPttPolling(jobId) {
       }
     } catch (e) {
       stopPttPolling();
+      stopPttTimer();
     }
   }, 500);
 }
@@ -908,6 +1039,28 @@ function renderTracePanel() {
     }
     root.appendChild(row);
   }
+}
+
+// M10-02: Render a swarm event into the swarm panel
+function renderSwarmNode(event) {
+  const list = $("#swarmNodeList");
+  if (!list) return;
+  const empty = list.querySelector(".empty");
+  if (empty) empty.remove();
+  const row = document.createElement("div");
+  row.className = "swarm-node-row";
+  const icons = { started: "🐝", node_done: "✅", completed: "🎉" };
+  const title = document.createElement("div");
+  title.style.fontWeight = "600";
+  title.textContent = `${icons[event.type] || "·"} ${event.type}${event.node_id ? ` · ${event.node_id}` : ""}`;
+  const desc = document.createElement("div");
+  desc.style.color = "var(--text-muted)";
+  desc.textContent = event.result
+    ? String(event.result).slice(0, 80)
+    : (event.swarm_id || "").slice(0, 16);
+  row.appendChild(title);
+  row.appendChild(desc);
+  list.insertBefore(row, list.firstChild);
 }
 
 function renderAgentJobs(jobs) {
@@ -1003,6 +1156,7 @@ async function submitAgentJob(ev) {
 
 async function loadBattery() {
   const widget = $("#batteryWidget");
+  const banner = $("#lowBatteryBanner");
   if (!widget) return;
   try {
     const data = await api(API.hardwarePisugar);
@@ -1010,9 +1164,12 @@ async function loadBattery() {
     const charging = data.is_charging ? " ⚡" : "";
     widget.textContent = `🔋 ${pct}%${charging}`;
     widget.hidden = false;
+    // HW-12: show low battery banner when < 15% and not charging
+    if (banner) banner.hidden = data.is_charging || pct >= 15;
   } catch (_) {
     // 404 or 503 means PiSugar is not present — hide widget silently
     widget.hidden = true;
+    if (banner) banner.hidden = true;
   }
 }
 
@@ -1134,6 +1291,9 @@ function bindPttButton() {
     if (state.pttJobId) return;
     btn.classList.add("is-ptt-active");
     btn.setAttribute("aria-pressed", "true");
+    // UI-03: optional haptic feedback + recording timer
+    if (navigator.vibrate) navigator.vibrate(30);
+    startPttTimer();
     try {
       const res = await api(API.pttStart, {
         method: "POST",
@@ -1144,11 +1304,13 @@ function bindPttButton() {
     } catch (err) {
       btn.classList.remove("is-ptt-active");
       btn.setAttribute("aria-pressed", "false");
+      stopPttTimer();
       showToast(`🎙 PTT start failed: ${err.message}`, "error");
     }
   };
   const onEnd = async (ev) => {
     ev.preventDefault();
+    stopPttTimer();
     if (!state.pttJobId) {
       btn.classList.remove("is-ptt-active");
       btn.setAttribute("aria-pressed", "false");
@@ -1331,8 +1493,72 @@ function bindStorageEvents() {
   });
 }
 
+// UI-14: First-run onboarding overlay
+function initOnboarding() {
+  if (localStorage.getItem("vibedump.onboarded")) return;
+  const overlay = $("#onboardingOverlay");
+  if (!overlay) return;
+  overlay.hidden = false;
+
+  let step = 0;
+  const steps = $$(".onboarding-step");
+  const dots = $$(".onboarding-dot");
+  const prevBtn = $("#onboardingPrev");
+  const nextBtn = $("#onboardingNext");
+  const doneBtn = $("#onboardingDone");
+
+  function goTo(n) {
+    if (steps[step]) steps[step].hidden = true;
+    if (dots[step]) dots[step].classList.remove("is-active");
+    step = n;
+    if (steps[step]) steps[step].hidden = false;
+    if (dots[step]) dots[step].classList.add("is-active");
+    if (prevBtn) prevBtn.hidden = step === 0;
+    if (nextBtn) nextBtn.hidden = step === steps.length - 1;
+    if (doneBtn) doneBtn.hidden = step !== steps.length - 1;
+  }
+
+  if (prevBtn) prevBtn.addEventListener("click", () => { if (step > 0) goTo(step - 1); });
+  if (nextBtn) nextBtn.addEventListener("click", () => { if (step < steps.length - 1) goTo(step + 1); });
+  if (doneBtn) doneBtn.addEventListener("click", () => {
+    localStorage.setItem("vibedump.onboarded", "1");
+    overlay.hidden = true;
+  });
+
+  goTo(0);
+}
+
+// UI-08: Bottom tab bar navigation
+function bindTabBar() {
+  const tabBtns = $$(".tab-btn");
+  const pttBtn = $("#pttHoldBtn");
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.tab;
+      if (tab === "record") {
+        // Record tab: delegate to PTT button (focus / trigger area)
+        if (pttBtn) pttBtn.focus();
+        return;
+      }
+      tabBtns.forEach((b) => { if (b.dataset.tab !== "record") b.classList.remove("is-active"); });
+      btn.classList.add("is-active");
+      if (tab === "dumps") {
+        const dumpsView = $("#dumpsView");
+        if (dumpsView) dumpsView.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (tab === "search") {
+        const searchInput = $("#searchInput");
+        if (searchInput) { searchInput.focus(); searchInput.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      } else if (tab === "settings") {
+        openDrawer($("#settingsDrawer"));
+      }
+    });
+  });
+}
+
 async function init() {
   bindEvents();
+  bindTabBar();
+  initOnboarding();
   try {
     const idleImg = $("#mascotImg");
     if (idleImg) idleImg.src = API.mascot("idle");
