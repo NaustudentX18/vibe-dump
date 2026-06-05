@@ -10,7 +10,7 @@
 
 <br/>
 
-[![Tests Status](https://img.shields.io/badge/Tests-430%20Passed-success?style=flat-square&logo=github&logoColor=white)](#testing)
+[![Tests Status](https://img.shields.io/badge/Tests-486%2B%20Passed-success?style=flat-square&logo=github&logoColor=white)](#testing)
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
 [![Framework](https://img.shields.io/badge/FastAPI-0.118+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Agent Engine](https://img.shields.io/badge/Pydantic--AI-v1.0-FF4081?style=flat-square&logo=pydantic&logoColor=white)](https://ai.pydantic.dev)
@@ -18,7 +18,7 @@
 
 Vibe-Dump is a pocket-sized AI spec compiler that transforms chaotic voice notes and audio ideas into structured, dev-ready **Vibe Coding Blueprints**. These blueprints are fully compatible with Cursor, Claude Code, Codex, or Gemini.
 
-The system runs locally as a single Python process on a Raspberry Pi Zero 2 W wearing a Waveshare Whisplay HAT, a PiSugar 3 battery, and a USB microphone. It exposes a modern, mobile-first web dashboard allowing you to drive the active-listening agent, check hardware telemetry, and manage syncs directly from your smartphone over the local network.
+The system runs locally as a single Python process on a Raspberry Pi Zero 2 W wearing a **PiSugar Whisplay HAT** (LCD, buttons, built-in MEMS mics + onboard speaker via WM8960) and a **PiSugar 3** battery. It exposes a modern, mobile-first web dashboard allowing you to drive the active-listening agent, battery telemetry, and cloud sync from your phone. Whisplay audio: [PiSugar/Whisplay](https://github.com/PiSugar/Whisplay).
 
 ---
 
@@ -44,7 +44,7 @@ The system runs locally as a single Python process on a Raspberry Pi Zero 2 W we
     <tr>
       <td><img src="docs/screenshots/dashboard-settings.png" alt="Settings Panel" width="100%"/></td>
       <td><img src="docs/screenshots/storage-panel.png" alt="Storage Panel" width="100%"/></td>
-      <td><img src="docs/screenshots/assembly-1.jpg" alt="Pi Assembly View" width="100%"/></td>
+      <td><img src="docs/screenshots/dumpi-idle.png" alt="Whisplay build — Dumpi on LCD" width="100%"/></td>
     </tr>
   </table>
 </div>
@@ -82,9 +82,9 @@ Transitions publish events to the event bus (`dump.status`) in real-time, causin
 
 ## Features
 
-- **Voice capture** — Push-to-talk recording via USB or 3.5mm mic, exposed to the agent pipeline as in-process WAVs. Works from the web UI, Pi HAT buttons, or mobile dashboard.
+- **Voice capture** — Push-to-talk via Whisplay HAT MEMS mics (WM8960), web UI, or Button D. Optional USB/BT mic for upgrades.
 - **Whisper STT** — Real `faster-whisper` speech-to-text with a fake fallback for local zero-config testing.
-- **Piper TTS** — Text-to-speech readback for audible playback of clarifying questions.
+- **Piper TTS** — Text-to-speech readback through the Whisplay onboard speaker (or USB/BT via `aplay`).
 - **7 LLM Providers** — Supports OpenAI, OpenRouter, NVIDIA NIM, Groq, Claude, Gemini, and local Ollama.
 - **SQLite FAG / RAG** — FTS5-backed chunk store, BM25 search, chunked transcripts, and sqlite schema integration.
 - **Dumpi mascot** — Procedural PIL mascot renderer generating unique palette frames per state.
@@ -143,10 +143,9 @@ For full physical details, refer to [docs/HARDWARE.md](docs/HARDWARE.md).
 | Qty | Component | Role | Specs & Notes |
 | :---: | :--- | :--- | :--- |
 | **1** | **Raspberry Pi Zero 2 W** | Compute Engine | 512 MB RAM. Headless configuration. |
-| **1** | **Waveshare Whisplay HAT** | Physical Interface | 240×280 ST7789 LCD, 4 custom buttons, WS2812 RGB LED. |
+| **1** | **PiSugar Whisplay HAT** | UI + Audio | 240×280 LCD, 4 buttons, WS2812 LED, **WM8960 dual MEMS mics + onboard speaker**. [Driver repo](https://github.com/PiSugar/Whisplay) |
 | **1** | **PiSugar 3 Battery HAT** | Power & Telemetry | I2C status readings, UPS mode, 5V boost. |
-| **1** | **USB microphone** | Audio Input | Zero 2 W lacks onboard mic/audio ports. |
-| **1** | **USB or Bluetooth Speaker** | TTS Readback | Provides voice prompt output. |
+| **0** | *(optional)* **USB / BT speaker** | Louder TTS | 3.5 mm jack or USB/BT if you want richer audio than the onboard speaker. |
 
 ---
 
@@ -163,6 +162,8 @@ Copy `.env.example` to `.env` and specify the API keys and configurations you ne
 | `VIBEDUMP_PC_BASE_URL` | `http://desktop-ujsii52.local:11434` | Ollama URL endpoint on your companion PC. |
 | `VIBEDUMP_PC_MODEL` | `qwen3-14b-agent` | Companion Ollama model used. |
 | `VIBEDUMP_RCLONE_REMOTE` | `gdrive:` | Target destination for cloud drive backup uploads. |
+| `VIBEDUMP_ALSA_CAPTURE_DEVICE` | *(auto)* | ALSA device for `arecord` (Whisplay WM8960 after driver install). |
+| `VIBEDUMP_ALSA_PLAYBACK_DEVICE` | *(auto)* | ALSA device for `aplay` TTS playback. |
 
 ---
 

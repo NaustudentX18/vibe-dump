@@ -1,9 +1,13 @@
 # Hardware
 
 The canonical physical target is a Raspberry Pi Zero 2 W wearing a
-Waveshare Whisplay HAT, a PiSugar 3 battery HAT, a USB microphone, and
-a USB or Bluetooth speaker. This page documents the pin map, the I2C
-addresses, and the assembly steps the install script automates.
+**PiSugar Whisplay HAT** (LCD, buttons, LED, **WM8960 audio**), and a
+**PiSugar 3** battery HAT. The Whisplay HAT includes **dual MEMS
+microphones and an onboard speaker** once the
+[PiSugar/Whisplay](https://github.com/PiSugar/Whisplay) driver is
+installed. USB or Bluetooth audio is an optional upgrade path.
+
+This page documents the pin map, I2C addresses, and install automation.
 
 ## Whisplay HAT pin map
 
@@ -17,7 +21,9 @@ and are the single source of truth for the rest of the app.
 | LCD SPI bus | SPI0 CE0 (`/dev/spidev0.0`) | `WHISPLAY_SPI_BUS=0`, `WHISPLAY_SPI_DEV=0` |
 | LCD SPI clock | 40 MHz | `WHISPLAY_SPI_HZ=40_000_000` |
 | LCD resolution | 240 × 280 | `WHISPLAY_WIDTH=240`, `WHISPLAY_HEIGHT=280` |
-| LCD IRQ line | GPIO25 | falling-edge interrupt from the ST7789 |
+| LCD D/C line | GPIO13 | data/command select (ST7789) |
+| LCD RST line | GPIO7 | hardware reset |
+| LCD Y offset | 20 px | Whisplay panel visible area offset |
 | LED (WS2812) | 1 pixel, SMbus-controlled MCU | `WHISPLAY_LED_COUNT=1` |
 | Button A | GPIO5 | active-low, on-HAT pull-up |
 | Button B | GPIO6 | active-low, on-HAT pull-up |
@@ -48,38 +54,40 @@ If the kernel cannot see `/dev/i2c-1`, the real bridge raises
 `PiSugarNotAvailable` and the app falls back to
 `FakePiSugarBridge`.
 
-## Microphone
+## Audio (WM8960)
 
-Any ALSA-visible input works. The recommended choices are:
+Install the official Whisplay driver before expecting audio devices:
 
-- **USB microphone** — plug-and-play, no `alsactl` config required.
-  Listed as `hw:0,0` once enumerated.
-- **3.5 mm headset / lav mic + USB audio dongle** — the Pi Zero 2 W
-  has no onboard audio jack, so a $3 USB sound card is the cheapest
-  path. May need a one-time `alsamixer` F-volume bump on Pi OS
-  Bookworm.
+```bash
+git clone https://github.com/PiSugar/Whisplay.git --depth 1
+cd Whisplay && sudo bash install_driver.sh && sudo reboot
+```
 
-The audio-capture bridge uses `arecord` from `alsa-utils` and writes
-WAVs into `$VIBEDUMP_PTT_DIR` (default `/tmp`).
+| Component | Details |
+|-----------|---------|
+| Codec | WM8960 (I2C `0x1a`, I2S) |
+| Capture | Dual MEMS mics — default input via `arecord` |
+| Playback | Onboard speaker + 3.5 mm line-out |
+| Driver repo | [PiSugar/Whisplay](https://github.com/PiSugar/Whisplay) |
 
-## Speaker
+Vibe-Dump uses `arecord` / `aplay` via
+[`audio_capture.py`](../vibedump/integrations/audio_capture.py) and
+[`audio_playback.py`](../vibedump/integrations/audio_playback.py).
+Set optional ALSA devices in `.env`:
 
-Two options:
+- `VIBEDUMP_ALSA_CAPTURE_DEVICE`
+- `VIBEDUMP_ALSA_PLAYBACK_DEVICE`
 
-- **USB or Bluetooth speaker** — the Pi Zero 2 W has no onboard audio
-  jack, so a small USB speaker (or any A2DP Bluetooth speaker paired
-  via `bluetoothctl`) is the path. `aplay`-compatible, no extra
-  wiring. Quality is fine for the listener's short follow-up prompts.
-- **Whisplay built-in piezo path** — the HAT does not include a
-  speaker, but the LCD's backlight driver exposes a PWM output some
-  builders repurpose. Treat as optional and project-specific.
+WAVs are staged in `$VIBEDUMP_PTT_DIR` (default `/tmp`).
 
-## Assembly photos
+**Upgrade path:** USB or Bluetooth speaker/mic if you want louder TTS or
+a different input — not required for the default Whisplay build.
 
-| | |
+## Screenshots
+
+| Dumpi idle | Dumpi listening |
 |---|---|
-| ![HAT stacked on Pi](docs/screenshots/assembly-1.jpg) | ![PiSugar 3 attached](docs/screenshots/assembly-2.jpg) |
-| ![USB mic and speaker](docs/screenshots/assembly-3.jpg) | ![Power and final build](docs/screenshots/assembly-4.jpg) |
+| ![Dumpi idle](screenshots/dumpi-idle.png) | ![Dumpi listening](screenshots/dumpi-listening.png) |
 
 ## Power budget
 

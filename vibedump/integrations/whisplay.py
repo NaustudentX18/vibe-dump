@@ -42,6 +42,13 @@ WHISPLAY_SPI_HZ: int = 40_000_000
 
 WHISPLAY_LED_COUNT: int = 1
 
+# ST7789 control lines (BCM) — matches PiSugar/Whisplay driver:
+# https://github.com/PiSugar/Whisplay
+WHISPLAY_DC_PIN: int = 13
+WHISPLAY_RST_PIN: int = 7
+# ST7789 visible area is offset 20px on the Whisplay panel.
+WHISPLAY_Y_OFFSET: int = 20
+
 # BCM pin numbers, active-low with on-HAT pull-ups. The bridge polls these
 # and treats LOW as "pressed". Order is stable; the buttons on the HAT face
 # the user left-to-right as A, B, C, D.
@@ -255,6 +262,9 @@ class RealWhisplayBridge:
         for pin in WHISPLAY_BUTTON_PINS.values():
             GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
+        GPIO.setup(WHISPLAY_DC_PIN, GPIO.OUT)
+        GPIO.setup(WHISPLAY_RST_PIN, GPIO.OUT)
+
         # Bring the LCD up. The ST7789 init sequence is the standard
         # Waveshare one - we send it once and never touch it again.
         self._init_st7789()
@@ -273,14 +283,34 @@ class RealWhisplayBridge:
         if img.size != (WHISPLAY_WIDTH, WHISPLAY_HEIGHT):
             img = img.resize((WHISPLAY_WIDTH, WHISPLAY_HEIGHT))
 
-        # ST7789 wants big-endian RGB565. Pushing the full frame over SPI at
-        # 40 MHz takes ~25 ms; we accept that latency for v0.3.
-        pixels = img.tobytes("raw", "RGB")
-        self._spi_write_command(0x2C)  # RAMWR
+        # ST7789 wants big-endian RGB565 (2 bytes/pixel).
+        pixels = img.tobytes("raw", "BGR;16")
+        self._set_window(0, 0, WHISPLAY_WIDTH - 1, WHISPLAY_HEIGHT - 1)
         self._spi_write_data(pixels)
+
+    def _set_window(self, x0: int, y0: int, x1: int, y1: int) -> None:
+        """Set the ST7789 draw window (Whisplay Y offset applied)."""
+        y0_adj = y0 + WHISPLAY_Y_OFFSET
+        y1_adj = y1 + WHISPLAY_Y_OFFSET
+        self._spi_write_command(0x2A)
+        self._spi_write_data(bytes([x0 >> 8, x0 & 0xFF, x1 >> 8, x1 & 0xFF]))
+        self._spi_write_command(0x2B)
+        self._spi_write_data(
+            bytes([y0_adj >> 8, y0_adj & 0xFF, y1_adj >> 8, y1_adj & 0xFF])
+        )
+        self._spi_write_command(0x2C)
 
     def _init_st7789(self) -> None:
         """Send the ST7789 init sequence. Idempotent across instances."""
+        self._GPIO.output(WHISPLAY_RST_PIN, self._GPIO.HIGH)
+        import time
+
+        time.sleep(0.01)
+        self._GPIO.output(WHISPLAY_RST_PIN, self._GPIO.LOW)
+        time.sleep(0.01)
+        self._GPIO.output(WHISPLAY_RST_PIN, self._GPIO.HIGH)
+        time.sleep(0.12)
+
         cmds: list[tuple[int, bytes | None]] = [
             (0x01, None),        # SWRESET
             (0x11, None),        # SLPOUT
@@ -296,17 +326,14 @@ class RealWhisplayBridge:
                 self._spi_write_data(data)
 
     def _spi_write_command(self, cmd: int) -> None:
-        # D/C low = command on the Whisplay HAT.
+        self._GPIO.output(self._GPIO.LOW, WHISPLAY_DC_PIN)
         self._spi.xfer2([cmd & 0xFF])
 
     def _spi_write_data(self, data: bytes) -> None:
-        # D/C high = data. We prepend a 0x00 byte to assert D/C; the Whisplay
-        # HAT breaks this out via a dedicated GPIO in the real schematic, but
-        # for v0.3 we keep the bus simple and rely on the protocol prefix.
-        # See install_whisplay_prereqs.sh for the GPIO mapping.
-        chunks = (len(data) + 4095) // 4096
-        for i in range(chunks):
-            self._spi.xfer2(data[i * 4096 : (i + 1) * 4096])
+        self._GPIO.output(self._GPIO.HIGH, WHISPLAY_DC_PIN)
+        max_chunk = 4096
+        for i in range(0, len(data), max_chunk):
+            self._spi.xfer2(data[i : i + max_chunk])
 
     # ---- LED -------------------------------------------------------------
 

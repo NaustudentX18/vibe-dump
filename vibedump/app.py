@@ -37,6 +37,10 @@ from .integrations.audio_capture import (
     AudioCaptureNotAvailable,
     make_audio_capture,
 )
+from .integrations.audio_playback import (
+    AudioPlayback,
+    make_audio_playback,
+)
 from .integrations.rclone_sync import (
     HOST_LAYOUT,
     RcloneBridge,
@@ -106,6 +110,7 @@ class AppState:
     pisugar: PiSugarBridge | None = None
     pisugar_monitor: PiSugarMonitor | None = None
     audio_capture: AudioCapture | None = None
+    audio_playback: AudioPlayback | None = None
     # STT provider name used by the PTT route. Defaults to ``"fake"`` so the
     # test suite (and zero-config dev) can run without a cloud STT key.
     ptt_stt_provider: str = "fake"
@@ -184,10 +189,16 @@ def _create_default_state() -> AppState:
         state.pisugar = make_pisugar(prefer="auto")
     except PiSugarNotAvailable:
         state.pisugar = None
+    capture_dev = os.environ.get("VIBEDUMP_ALSA_CAPTURE_DEVICE")
+    playback_dev = os.environ.get("VIBEDUMP_ALSA_PLAYBACK_DEVICE")
     try:
-        state.audio_capture = make_audio_capture(prefer="auto")
+        state.audio_capture = make_audio_capture(prefer="auto", device=capture_dev or None)
     except AudioCaptureNotAvailable:
         state.audio_capture = None
+    state.audio_playback = make_audio_playback(
+        prefer="auto",
+        device=playback_dev or None,
+    )
     # M6: rclone bridge. ``make_rclone`` already does the auto-fallback to
     # the in-memory fake when the real binary is missing, so we don't have
     # to guard with a try/except like the hardware bridges above.
@@ -383,9 +394,13 @@ def create_app(state: AppState | None = None) -> Any:
     except ModuleNotFoundError as exc:  # pragma: no cover - optional dep path
         raise RuntimeError("Install vibe-dump[web] to use the web app") from exc
 
+    from fastapi.staticfiles import StaticFiles
+
     app_state = state or _create_default_state()
     app = FastAPI(title="Vibe-Dump")
     app.state.vibedump = app_state
+    if STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
     class CreateDumpRequest(BaseModel):
         title: str = Field(min_length=1, max_length=200)
@@ -725,7 +740,13 @@ def create_app(state: AppState | None = None) -> Any:
                 # in dev / CI.
                 from vibedump.integrations.audio_capture import _write_silent_wav
 
-                _write_silent_wav(wav_path, duration_s)
+                _write_silent_wav(
+                    wav_path,
+                    duration_s=duration_s,
+                    sample_rate=16000,
+                    channels=1,
+                    sample_width=2,
+                )
 
             with app_state.ptt_lock:
                 if job.status == "cancelled":
@@ -1305,6 +1326,8 @@ def create_app(state: AppState | None = None) -> Any:
             "runtime_error": app_state.agent_runtime_error,
         }
 
+    MAX_STREAM_BYTES = int(os.environ.get("VIBEDUMP_AUDIO_MAX_BYTES", "1200000"))
+
     @app.websocket("/api/audio/stream")
     async def audio_stream(
         websocket: WebSocket,
@@ -1318,9 +1341,14 @@ def create_app(state: AppState | None = None) -> Any:
             return
 
         pcm_chunks = []
+        total_bytes = 0
         try:
             while True:
                 data = await websocket.receive_bytes()
+                total_bytes += len(data)
+                if total_bytes > MAX_STREAM_BYTES:
+                    await websocket.close(code=1009, reason="message too big")
+                    return
                 pcm_chunks.append(data)
         except WebSocketDisconnect:
             pass
@@ -1356,25 +1384,48 @@ def create_app(state: AppState | None = None) -> Any:
 
             try:
                 st.pipeline.step_listener(dump_id)
-            except Exception:
-                pass
+                await websocket.send_json(
+                    {
+                        "type": "ack",
+                        "transcript": transcript,
+                        "audio_path": wav_path,
+                    }
+                )
+            except Exception as exc:
+                await websocket.send_json({"type": "error", "message": str(exc)})
+                await websocket.close(code=1011, reason="pipeline error")
 
-    @app.get("/api/companion/cursor")
-    def companion_cursor(st: State) -> dict[str, Any]:
-        dumps = st.db.list_dumps(limit=1)
-        if not dumps:
-            raise HTTPException(status_code=404, detail="no dumps found")
-        dump = dumps[0]
+    def _resolve_companion_dump(
+        st: AppState,
+        dump_id: int | None,
+    ) -> tuple[DumpRecord, BlueprintRecord]:
+        if dump_id is not None:
+            dump = st.db.get_dump(dump_id)
+            if dump is None:
+                raise HTTPException(status_code=404, detail="dump not found")
+        else:
+            dumps = st.db.list_dumps(limit=1)
+            if not dumps:
+                raise HTTPException(status_code=404, detail="no dumps found")
+            dump = dumps[0]
         blueprint = st.db.get_latest_blueprint(dump.id)
         if blueprint is None:
             raise HTTPException(status_code=404, detail="no blueprint found")
+        return dump, blueprint
+
+    @app.get("/api/companion/cursor")
+    def companion_cursor(
+        st: State,
+        dump_id: int | None = Query(default=None),
+    ) -> dict[str, Any]:
+        dump, blueprint = _resolve_companion_dump(st, dump_id)
         return {
             "rules": blueprint.markdown,
             "metadata": {
                 "dump_id": dump.id,
                 "title": dump.title,
-                "created_at": dump.created_at
-            }
+                "created_at": dump.created_at,
+            },
         }
 
     @app.post("/api/companion/cursor")
@@ -1382,21 +1433,18 @@ def create_app(state: AppState | None = None) -> Any:
         return {"status": "ok", "action_received": body.action}
 
     @app.get("/api/companion/claudecode")
-    def companion_claudecode(st: State) -> dict[str, Any]:
-        dumps = st.db.list_dumps(limit=1)
-        if not dumps:
-            raise HTTPException(status_code=404, detail="no dumps found")
-        dump = dumps[0]
-        blueprint = st.db.get_latest_blueprint(dump.id)
-        if blueprint is None:
-            raise HTTPException(status_code=404, detail="no blueprint found")
+    def companion_claudecode(
+        st: State,
+        dump_id: int | None = Query(default=None),
+    ) -> dict[str, Any]:
+        dump, blueprint = _resolve_companion_dump(st, dump_id)
         return {
             "context": blueprint.markdown,
             "metadata": {
                 "dump_id": dump.id,
                 "title": dump.title,
-                "created_at": dump.created_at
-            }
+                "created_at": dump.created_at,
+            },
         }
 
     @app.post("/api/companion/claudecode")

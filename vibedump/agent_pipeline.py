@@ -51,6 +51,15 @@ from .providers.base import LLMProvider
 from .ragmemory import RagMemory
 from .schemas import BLUEPRINT_SECTIONS, blueprint_template, validate_blueprint
 
+# Memory subsystem: best-effort import so the pipeline works in environments
+# where the memory package has not been installed (e.g. legacy tests).
+try:
+    from .memory.store import MemoryStore as _MemoryStore
+    _HAS_MEMORY_STORE = True
+except ImportError:  # pragma: no cover - exercised via monkeypatch
+    _MemoryStore = None  # type: ignore[assignment,misc]
+    _HAS_MEMORY_STORE = False
+
 # pydantic-graph: best-effort import. When unavailable the inline
 # ``step_listener`` path on :class:`AgentPipeline` remains the only
 # entry point; :class:`GraphPipeline` refuses to construct.
@@ -110,6 +119,10 @@ class AgentPipeline:
         self.memory = RagMemory(db)
         self._explicit_llm = llm
         self._resolved_llm: LLMProvider | None = None
+        # Optional higher-level memory store wired in when available.
+        self.memory_store: "_MemoryStore | None" = (
+            _MemoryStore(db) if _HAS_MEMORY_STORE else None  # type: ignore[arg-type]
+        )
 
     @property
     def llm(self) -> LLMProvider | None:
@@ -210,6 +223,21 @@ class AgentPipeline:
         transcript = _turn_dicts(self.db.list_turns(dump_id))
         prompt = render_listener_prompt(transcript, dump.title)
         self._set_status(dump_id, _STATUS_THINKING)
+
+        # M10: surface relevant memory hits before the LLM call so callers
+        # (and future prompt-augmentation code) can access prior context.
+        # The recall is best-effort: any failure is silently swallowed so the
+        # pipeline continues regardless of memory store availability.
+        if self.memory_store is not None:
+            try:
+                _last_user = next(
+                    (t["text"] for t in reversed(transcript) if t["role"] == "user"),
+                    dump.title,
+                )
+                self._last_recall = self.memory_store.recall(_last_user, limit=5)
+            except Exception:  # noqa: BLE001 - telemetry, never breaks the run
+                self._last_recall = []
+
         raw = llm.complete(prompt)
         decision: ListenerDecision = parse_listener_response(raw)
         self.db.add_turn(dump_id, "assistant", decision.text)

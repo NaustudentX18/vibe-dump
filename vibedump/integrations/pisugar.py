@@ -314,7 +314,13 @@ class PiSugarMonitor:
             self._thread = None
 
     def run_forever(self) -> None:
-        pass
+        """Block until :meth:`stop` is called (standalone daemon entry)."""
+        self.start()
+        try:
+            while not self._stop_event.is_set():
+                self._stop_event.wait(timeout=1.0)
+        finally:
+            self.stop()
 
     def _run(self) -> None:
         while not self._stop_event.is_set():

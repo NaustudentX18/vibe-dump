@@ -19,6 +19,7 @@ UNITS=(
   "vibedump.service"
   "vibedump-whisplay.service"
   "vibedump-pisugar.service"
+  "vibedump-agent.service"
 )
 
 # Minimal color helpers - degrade gracefully on non-tty.
@@ -58,7 +59,7 @@ do_install() {
     exit 1
   fi
 
-  echo "Installing VibeDrop systemd units to ${UNIT_DIR} ..."
+  echo "Installing Vibe-Dump systemd units to ${UNIT_DIR} ..."
   for unit in "${UNITS[@]}"; do
     local src="${UNIT_SRC_DIR}/${unit}"
     local dst="${UNIT_DIR}/${unit}"
@@ -74,6 +75,7 @@ do_install() {
   systemctl enable vibedump.service
   systemctl enable vibedump-whisplay.service
   systemctl enable vibedump-pisugar.service
+  systemctl enable vibedump-agent.service
 
   echo
   echo "Run: sudo systemctl start vibedump"
@@ -85,7 +87,7 @@ do_uninstall() {
     exit 1
   fi
 
-  echo "Uninstalling VibeDrop systemd units ..."
+  echo "Uninstalling Vibe-Dump systemd units ..."
   for unit in "${UNITS[@]}"; do
     local path="${UNIT_DIR}/${unit}"
     # disable --now is best-effort: ignore failures (unit may not be loaded).
@@ -103,7 +105,7 @@ do_uninstall() {
 }
 
 do_status() {
-  echo "VibeDrop systemd unit status:"
+  echo "Vibe-Dump systemd unit status:"
   for unit in "${UNITS[@]}"; do
     local enabled_state="unknown"
     local active_state="unknown"
