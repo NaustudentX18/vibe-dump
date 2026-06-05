@@ -1,9 +1,11 @@
 # Vibe-Dump
 
-> **Voice dumps → software blueprints, on a Pi Zero 2 W.**
+> **Voice dumps ➔ polished turds. AI spec compiler for Pi Zero 2 W.**
 
 <div align="center">
   <img src="docs/logo.png" alt="Vibe-Dump Logo" width="250px"/>
+  <br/>
+  <p><em>"Dumpi, the AI agent that turns your dumped AI vibe code idea slop into a polished turd!"</em></p>
 </div>
 
 <br/>
