@@ -2,6 +2,12 @@
 
 > **Voice dumps → software blueprints, on a Pi Zero 2 W.**
 
+<div align="center">
+  <img src="docs/logo.png" alt="Vibe-Dump Logo" width="250px"/>
+</div>
+
+<br/>
+
 [![Tests Status](https://img.shields.io/badge/Tests-430%20Passed-success?style=flat-square&logo=github&logoColor=white)](#testing)
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
 [![Framework](https://img.shields.io/badge/FastAPI-0.118+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
