@@ -375,6 +375,8 @@ def create_app(state: AppState | None = None) -> Any:
             Response,
             UploadFile,
             status,
+            WebSocket,
+            WebSocketDisconnect,
         )
         from fastapi.responses import HTMLResponse, StreamingResponse
         from pydantic import BaseModel, Field
@@ -423,6 +425,10 @@ def create_app(state: AppState | None = None) -> Any:
 
     class StorageRedactPreviewRequest(BaseModel):
         config: dict[str, Any] = Field(default_factory=dict)
+
+    class CompanionActionRequest(BaseModel):
+        action: str | None = None
+        data: dict[str, Any] = Field(default_factory=dict)
 
     def get_state(request: Request) -> AppState:
         return request.app.state.vibedump  # type: ignore[no-any-return]
@@ -1299,7 +1305,103 @@ def create_app(state: AppState | None = None) -> Any:
             "runtime_error": app_state.agent_runtime_error,
         }
 
-    return app
+    @app.websocket("/api/audio/stream")
+    async def audio_stream(
+        websocket: WebSocket,
+        dump_id: int,
+    ):
+        await websocket.accept()
+        st = websocket.app.state.vibedump
+        dump = st.db.get_dump(dump_id)
+        if dump is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="dump not found")
+            return
+
+        pcm_chunks = []
+        try:
+            while True:
+                data = await websocket.receive_bytes()
+                pcm_chunks.append(data)
+        except WebSocketDisconnect:
+            pass
+
+        if pcm_chunks:
+            all_pcm = b"".join(pcm_chunks)
+            PTT_TMP_DIR.mkdir(parents=True, exist_ok=True)
+            wav_path = str(PTT_TMP_DIR / f"vibedump_stream_{uuid4().hex}.wav")
+
+            import wave
+            with wave.open(wav_path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(16000)
+                wf.writeframes(all_pcm)
+
+            provider_name = getattr(st, "ptt_stt_provider", "fake")
+            try:
+                stt = st.pipeline.registry.stt[provider_name]
+            except KeyError:
+                stt = next(iter(st.pipeline.registry.stt.values()), None)
+
+            if stt is not None:
+                transcript = stt.transcribe(wav_path)
+            else:
+                transcript = "Fake stream transcription"
+
+            # Add user turn with audio_path
+            turn_id = st.db.add_turn(dump_id, "user", transcript, audio_path=wav_path)
+            st.memory.remember(dump_id, "turn", turn_id, transcript)
+
+            st.bus.publish("dump.user_turn", {"dump_id": dump_id, "text": transcript})
+
+            try:
+                st.pipeline.step_listener(dump_id)
+            except Exception:
+                pass
+
+    @app.get("/api/companion/cursor")
+    def companion_cursor(st: State) -> dict[str, Any]:
+        dumps = st.db.list_dumps(limit=1)
+        if not dumps:
+            raise HTTPException(status_code=404, detail="no dumps found")
+        dump = dumps[0]
+        blueprint = st.db.get_latest_blueprint(dump.id)
+        if blueprint is None:
+            raise HTTPException(status_code=404, detail="no blueprint found")
+        return {
+            "rules": blueprint.markdown,
+            "metadata": {
+                "dump_id": dump.id,
+                "title": dump.title,
+                "created_at": dump.created_at
+            }
+        }
+
+    @app.post("/api/companion/cursor")
+    def companion_cursor_post(body: CompanionActionRequest, st: State) -> dict[str, Any]:
+        return {"status": "ok", "action_received": body.action}
+
+    @app.get("/api/companion/claudecode")
+    def companion_claudecode(st: State) -> dict[str, Any]:
+        dumps = st.db.list_dumps(limit=1)
+        if not dumps:
+            raise HTTPException(status_code=404, detail="no dumps found")
+        dump = dumps[0]
+        blueprint = st.db.get_latest_blueprint(dump.id)
+        if blueprint is None:
+            raise HTTPException(status_code=404, detail="no blueprint found")
+        return {
+            "context": blueprint.markdown,
+            "metadata": {
+                "dump_id": dump.id,
+                "title": dump.title,
+                "created_at": dump.created_at
+            }
+        }
+
+    @app.post("/api/companion/claudecode")
+    def companion_claudecode_post(body: CompanionActionRequest, st: State) -> dict[str, Any]:
+        return {"status": "ok", "action_received": body.action}
 
     return app
 

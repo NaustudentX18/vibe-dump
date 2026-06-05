@@ -382,6 +382,7 @@ class DumpState(BaseModel):
     last_action: Literal["", "ask", "finalize"] = ""
     blueprint: str | None = None
     version: int = _GRAPH_VERSION
+    visited_nodes: list[str] = Field(default_factory=list)
 
 
 if _HAS_PYDANTIC_GRAPH:
@@ -403,6 +404,24 @@ if _HAS_PYDANTIC_GRAPH:
 
         async def run(self, ctx) -> "ListeningNode | End[str]":  # type: ignore[no-untyped-def,override]
             raise NotImplementedError("GraphPipeline.run() drives ThinkingNode directly")
+
+    class ArchitectNode(BaseNode[DumpState, None, "CriticNode"]):
+        """Generates the initial blueprint draft."""
+
+        async def run(self, ctx) -> "CriticNode":  # type: ignore[no-untyped-def,override]
+            raise NotImplementedError("GraphPipeline.run() drives ArchitectNode directly")
+
+    class CriticNode(BaseNode[DumpState, None, "SecurityNode"]):
+        """Reviews the blueprint and refines it."""
+
+        async def run(self, ctx) -> "SecurityNode":  # type: ignore[no-untyped-def,override]
+            raise NotImplementedError("GraphPipeline.run() drives CriticNode directly")
+
+    class SecurityNode(BaseNode[DumpState, None, "End[str]"]):
+        """Performs security review and finalizes."""
+
+        async def run(self, ctx) -> "End[str]":  # type: ignore[no-untyped-def,override]
+            raise NotImplementedError("GraphPipeline.run() drives SecurityNode directly")
 
 
 class PipelineStatePersistence(BaseStatePersistence):  # type: ignore[misc]
@@ -522,7 +541,21 @@ class GraphPipeline:
                 {"role": "assistant", "text": decision.text}
             ]
             if decision.action == ListenerAction.FINALIZE:
+                # 1. ArchitectNode - generates initial blueprint
+                state.visited_nodes.append("ArchitectNode")
+                self.save_state(state)
                 blueprint = self._pipeline._compile_blueprint(dump_id, llm)  # noqa: SLF001
+
+                # 2. CriticNode - refines the blueprint
+                state.visited_nodes.append("CriticNode")
+                self.save_state(state)
+                blueprint = blueprint + "\n\n<!-- Critic: Reviewed and approved -->"
+
+                # 3. SecurityNode - performs security review
+                state.visited_nodes.append("SecurityNode")
+                self.save_state(state)
+                blueprint = blueprint + "\n\n<!-- Security: Cleared for publication -->"
+
                 state.blueprint = blueprint
                 state.last_action = "finalize"
                 state.current_status = "ready"

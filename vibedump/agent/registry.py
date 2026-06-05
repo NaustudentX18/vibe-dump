@@ -58,6 +58,56 @@ class ToolRegistry:
             raise ValueError(f"tool already registered: {tool.name!r}")
         self._tools[tool.name] = tool
 
+    def register_mcp_tool(self, mcp_schema: dict[str, Any], handler: Callable[[Any], dict[str, Any]]) -> None:
+        """Parse a standard Model Context Protocol JSON schema and register it as a tool."""
+        from pydantic import create_model, Field
+
+        name = mcp_schema["name"]
+        description = mcp_schema.get("description", "")
+        input_schema = mcp_schema.get("inputSchema", {})
+
+        properties = input_schema.get("properties", {})
+        required_fields = input_schema.get("required", [])
+
+        fields = {}
+        for field_name, field_info in properties.items():
+            json_type = field_info.get("type", "string")
+            if json_type == "string":
+                py_type = str
+            elif json_type == "integer":
+                py_type = int
+            elif json_type == "number":
+                py_type = float
+            elif json_type == "boolean":
+                py_type = bool
+            elif json_type == "array":
+                py_type = list
+            elif json_type == "object":
+                py_type = dict
+            else:
+                py_type = Any
+
+            field_desc = field_info.get("description", "")
+            if field_name in required_fields:
+                default_val = ...
+            else:
+                default_val = field_info.get("default", None)
+
+            fields[field_name] = (py_type, Field(default=default_val, description=field_desc))
+
+        if fields:
+            input_model = create_model(f"{name}_input", **fields)
+        else:
+            input_model = create_model(f"{name}_input")
+
+        tool = ToolDefinition(
+            name=name,
+            description=description,
+            input_model=input_model,
+            handler=handler,
+        )
+        self.register(tool)
+
     # ------------------------------------------------------------------
     # Introspection
     # ------------------------------------------------------------------
