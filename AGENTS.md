@@ -17,7 +17,8 @@ Vibe-Dump is a single-process Python FastAPI app: voice-dump → AI spec compile
 ### Git workflow (swarm / multi-wave work)
 
 - **Push often:** After each logical wave or testable chunk, commit and `git push -u origin cursor/<name>-f243`. Keep the PR updated.
-- **Merge once:** Merge into `master` only when gates pass (`pytest` green, roadmap QA for that wave). Leave PRs **draft** until then.
+- **Merge once:** Merge into `main` only when gates pass (`pytest` green, roadmap QA for that wave). Leave PRs **draft** until then.
+- **Single branch:** All work lands on `main`; delete feature branches after merge.
 
 ### Standard commands
 
