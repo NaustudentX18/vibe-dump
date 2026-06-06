@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: [master, "cursor/**"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -e ".[web,all]" pillow ruff
+      - name: Pytest
+        run: python -m pytest -q
+      - name: Ruff (auto-fixable subset)
+        run: python -m ruff check vibedump tests --fix --exit-zero

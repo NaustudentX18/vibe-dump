@@ -151,7 +151,7 @@
 | [x] | HW-10 | 🟠 | Fix `_write_silent_wav` keyword-only call in `app.py` | `hw-audio` | `app.py:728` | — | No TypeError if `audio_capture=None` |
 | [ ] | HW-11 | 🟠 | Hardware smoke script covers audio round-trip | `hw-audio` | `scripts/hardware_smoke.sh`, tests | HW-06, HW-07 | `arecord` → `aplay` loop passes on Pi |
 | [x] | HW-12 | 🟡 | Battery low/critical SSE + dashboard banner | `hw-pisugar` | `app.py`, `dashboard.html` | HW-01, UI-15 | <15% shows persistent banner |
-| [ ] | HW-13 | 🟡 | Delete dead `vibedump/hardware_control.py` FakeHardware | `hw-cleanup` | `hardware_control.py`, imports | — | Grep shows no references; tests green |
+| [x] | HW-13 | 🟡 | Delete dead `vibedump/hardware_control.py` FakeHardware | `hw-cleanup` | `hardware_control.py`, imports | — | Grep shows no references; tests green |
 | [x] | HW-14 | 🟡 | E2E PTT test (fake path) | `hw-test` | `tests/test_hardware_ptt_e2e.py` | — | start → complete → turn in DB |
 | [x] | HW-15 | 🟡 | Whisplay daemon tests | `hw-test` | `tests/test_whisplay_daemon.py` | HW-02 | Mock bridge; asserts poll loop calls |
 
@@ -180,14 +180,14 @@
 | [x] | UI-13 | 🟠 | SSE connection health indicator | `ui-polish` | header/mascot | — | Green/amber/red dot; reconnect refreshes data |
 | [x] | UI-14 | 🟠 | First-run onboarding coach marks | `ui-onboard` | overlay JS | UI-05 | 3-step tour; `localStorage` flag |
 | [x] | UI-15 | 🟠 | PiSugar battery widget in header | `ui-hardware` | header | HW-01 | Shows % when real bridge; hidden on fake |
-| [ ] | UI-16 | 🟡 | Light mode + manual theme toggle | `ui-theme` | CSS variables | — | `prefers-color-scheme` + Settings toggle |
-| [ ] | UI-17 | 🟡 | Transcript chat bubbles (avatars, timestamps) | `ui-transcript` | transcript panel | — | Profile name + Dumpi avatar |
-| [ ] | UI-18 | 🟡 | Dump list sort/filter + metadata | `ui-dumps` | dump list | — | Status chips; relative timestamps |
-| [ ] | UI-19 | 🟡 | Storage panel sync progress + honest remote warning | `ui-settings` | storage section | — | Prominent "env var only" chip |
-| [ ] | UI-20 | 🟡 | Agent job inline expand + status colors | `ui-agent` | agent section | — | Completed/failed row borders |
-| [ ] | UI-21 | 🟡 | Skeleton loaders + button press micro-interactions | `ui-polish` | global CSS | — | Shimmer on fetch; `scale(0.97)` on active |
-| [ ] | UI-22 | 🟡 | Custom delete confirm sheet (replace `confirm()`) | `ui-a11y` | delete flow | — | `role="alertdialog"` bottom sheet |
-| [ ] | UI-23 | 🟡 | Achievement unlock overlay animation | `ui-mascot` | mascot panel | UI-11 | Trophy reveal on SSE `achievement.unlocked` |
+| [x] | UI-16 | 🟡 | Light mode + manual theme toggle | `ui-theme` | CSS variables | — | `prefers-color-scheme` + Settings toggle |
+| [x] | UI-17 | 🟡 | Transcript chat bubbles (avatars, timestamps) | `ui-transcript` | transcript panel | — | Profile name + Dumpi avatar |
+| [x] | UI-18 | 🟡 | Dump list sort/filter + metadata | `ui-dumps` | dump list | — | Status chips; relative timestamps |
+| [x] | UI-19 | 🟡 | Storage panel sync progress + honest remote warning | `ui-settings` | storage section | — | Prominent "env var only" chip |
+| [x] | UI-20 | 🟡 | Agent job inline expand + status colors | `ui-agent` | agent section | — | Completed/failed row borders |
+| [x] | UI-21 | 🟡 | Skeleton loaders + button press micro-interactions | `ui-polish` | global CSS | — | Shimmer on fetch; `scale(0.97)` on active |
+| [x] | UI-22 | 🟡 | Custom delete confirm sheet (replace `confirm()`) | `ui-a11y` | delete flow | — | `role="alertdialog"` bottom sheet |
+| [x] | UI-23 | 🟡 | Achievement unlock overlay animation | `ui-mascot` | mascot panel | UI-11 | Trophy reveal on SSE `achievement.unlocked` |
 | [x] | UI-24 | 🟠 | Dashboard HTML structure tests updated | `ui-test` | `tests/test_dashboard_html.py` | UI-01–08 | All new element IDs asserted |
 
 ---
@@ -236,7 +236,7 @@
 | Done | ID | Pri | Task | Agent | Acceptance criteria |
 |------|-----|-----|------|-------|---------------------|
 | [x] | QA-01 | 🔴 | Full pytest on `v2-pass` branch | `test-auditor` | 440+ passed, <60s |
-| [ ] | QA-02 | 🔴 | Ruff check | `test-auditor` | Zero new errors (fix or baseline) |
+| [x] | QA-02 | 🔴 | Ruff check | `test-auditor` | Zero new errors (fix or baseline) |
 | [ ] | QA-03 | 🔴 | Spec compliance vs this roadmap | `spec-auditor` | Every [x] task has evidence |
 | [ ] | QA-04 | 🟠 | Soak test 10 min | `perf-auditor` | `./scripts/soak.sh` exit 0 |
 | [x] | QA-05 | 🟠 | Docs audit (no USB mic claim) | `docs-auditor` | Grep `USB mic` only in "upgrade" context |
@@ -251,7 +251,7 @@
 | Done | ID | Pri | Task | Agent | Acceptance criteria |
 |------|-----|-----|------|-------|---------------------|
 | [ ] | REL-01 | 🔴 | Squash merge to `master` | `wrap` | Single commit; trailers: Confidence, Scope-risk, Tested |
-| [ ] | REL-02 | 🔴 | Update README badge + screenshots | `wrap` | GitHub landing reflects shipped state |
+| [x] | REL-02 | 🔴 | Update README badge + screenshots | `wrap` | GitHub landing reflects shipped state |
 | [ ] | REL-03 | 🟠 | Tag `v0.2.0` | `wrap` | Git tag + short release notes |
 | [x] | REL-04 | 🟠 | Mark all completed tasks [x] in this file | `wrap` | Roadmap reflects reality |
 
@@ -326,15 +326,15 @@ Wave 5–6:
 | Wave | Tasks | Done | % |
 |------|-------|------|---|
 | 0 — Gates & docs | 11 | 9 | 82% |
-| 1 — Hardware | 15 | 13 | 87% |
-| 2 — Web UI | 25 | 17 | 68% |
+| 1 — Hardware | 15 | 14 | 93% |
+| 2 — Web UI | 25 | 25 | 100% |
 | 3 — Hardening | 8 | 8 | 100% |
 | 4 — M10 | 12 | 8 | 67% |
-| 5 — QA | 8 | 2 | 25% |
-| 6 — Release | 4 | 1 | 25% |
-| **Total** | **83** | **58** | **70%** |
+| 5 — QA | 8 | 3 | 38% |
+| 6 — Release | 4 | 2 | 50% |
+| **Total** | **83** | **71** | **86%** |
 
-**Deferred:** Pi hardware gates (HW-GATE-01/02), P2 UI polish (UI-16–23), real bge embeddings (M10-04), Smart Dumpi (M10-09), release merge/tag.
+**Deferred (needs Pi):** HW-GATE-01/02, HW-11, QA-06. **Deferred (future):** M10-04/09/10/12. **Shipped in v0.2.0:** (HW-GATE-01/02), P2 UI polish (UI-16–23), real bge embeddings (M10-04), Smart Dumpi (M10-09), release merge/tag.
 
 ---
 

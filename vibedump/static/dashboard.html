@@ -41,6 +41,16 @@
   </nav>
 
   <aside class="drawer right" id="settingsDrawer" role="dialog" aria-modal="true" aria-label="Settings">
+    <h2>Appearance</h2>
+    <div class="theme-toggle-row field">
+      <label for="themeToggle">Theme</label>
+      <select id="themeToggle" aria-label="Color theme">
+        <option value="auto">System</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
+    </div>
+
     <h2>Profile</h2>
     <div class="field">
       <span id="profileName">Loading…</span>
@@ -92,6 +102,7 @@
 
     <h2>☁ Storage</h2>
     <div id="storageStatus" class="field" aria-live="polite">
+      <span class="env-only-chip" id="storageEnvChip">⚠ Remote path is env-only (VIBEDUMP_RCLONE_REMOTE)</span>
       <div class="health-row" id="storageRcloneRow">
         <span class="health-dot" id="storageRcloneDot"></span>
         <span id="storageRcloneLabel">Checking rclone…</span>
@@ -203,6 +214,21 @@
     <section class="split" id="dumpsView">
       <div class="card" aria-labelledby="dumpsHeading">
         <h2 id="dumpsHeading">📚 Dumps</h2>
+        <div class="dump-toolbar" id="dumpToolbar">
+          <input id="dumpFilterInput" type="search" placeholder="Filter title…" aria-label="Filter dumps" />
+          <select id="dumpStatusFilter" aria-label="Filter by status">
+            <option value="">All statuses</option>
+            <option value="draft">draft</option>
+            <option value="listening">listening</option>
+            <option value="thinking">thinking</option>
+            <option value="ready">ready</option>
+          </select>
+          <select id="dumpSortSelect" aria-label="Sort dumps">
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="title">Title A–Z</option>
+          </select>
+        </div>
         <div class="dump-list" id="dumpList"></div>
       </div>
       <div class="card" aria-labelledby="detailHeading">
@@ -241,6 +267,26 @@
   </nav>
 
   <div class="event-log" id="eventLog" aria-live="polite"></div>
+
+  <div id="confirmSheet" class="confirm-sheet" hidden>
+    <div class="confirm-sheet-card" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="confirmBody">
+      <h3 id="confirmTitle">Confirm</h3>
+      <p id="confirmBody"></p>
+      <div class="row-actions">
+        <button class="btn" id="confirmCancel" type="button">Cancel</button>
+        <button class="btn primary" id="confirmOk" type="button">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="achievementOverlay" class="achievement-overlay" hidden role="dialog" aria-modal="true" aria-label="Achievement unlocked">
+    <div class="achievement-card">
+      <span class="achievement-trophy">🏆</span>
+      <h2 id="achievementTitle">Achievement unlocked!</h2>
+      <p id="achievementDesc"></p>
+      <button class="btn primary" id="achievementDismiss" type="button">Nice!</button>
+    </div>
+  </div>
 
   <!-- UI-14: First-run onboarding overlay -->
   <div id="onboardingOverlay" class="onboarding-overlay" hidden role="dialog" aria-modal="true" aria-label="Welcome to Vibe-Dump">

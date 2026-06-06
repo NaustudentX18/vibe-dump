@@ -926,3 +926,153 @@ pre {
   margin-bottom: 4px;
   font-size: 0.8rem;
 }
+
+/* UI-16: Light theme */
+html[data-theme="light"] {
+  --bg-base: #f4f6fb;
+  --bg-elev-1: #ffffff;
+  --bg-elev-2: #e8ecf4;
+  --bg-glass: rgba(255, 255, 255, 0.75);
+  --text-primary: oklch(22% 0.02 260);
+  --text-secondary: oklch(42% 0.04 260);
+  --text-muted: oklch(58% 0.04 260);
+  --border-subtle: rgba(100, 120, 180, 0.22);
+  --shadow-glass: 0 8px 24px rgba(30, 40, 80, 0.08);
+}
+.theme-toggle-row { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+
+/* UI-17: Transcript chat bubbles */
+.chat-thread { display: flex; flex-direction: column; gap: var(--space-3); }
+.chat-bubble {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  max-width: 92%;
+}
+.chat-bubble--assistant { align-self: flex-start; }
+.chat-bubble--user { align-self: flex-end; flex-direction: row-reverse; }
+.chat-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: var(--bg-elev-2);
+  display: grid; place-items: center;
+  font-size: 1rem; flex-shrink: 0;
+}
+.chat-body {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  padding: var(--space-2) var(--space-3);
+  font-size: 0.9rem;
+}
+.chat-bubble--user .chat-body { background: rgba(74, 214, 255, 0.12); }
+.chat-meta { font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; }
+
+/* UI-18: Dump list filters */
+.dump-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  align-items: center;
+}
+.dump-toolbar select, .dump-toolbar input {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  color: inherit;
+  padding: 6px 10px;
+  font: inherit;
+}
+.status-chip-sm {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-elev-2);
+}
+
+/* UI-19: Storage env chip */
+.env-only-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: rgba(255, 180, 92, 0.2);
+  color: var(--accent-warn);
+  margin-bottom: var(--space-2);
+}
+
+/* UI-20: Agent job rows */
+.agent-job-row {
+  border-left: 3px solid var(--border-subtle);
+  padding: var(--space-2);
+  margin-bottom: var(--space-2);
+  border-radius: 8px;
+  background: var(--bg-elev-1);
+  cursor: pointer;
+}
+.agent-job-row[data-status="completed"] { border-left-color: var(--accent-good); }
+.agent-job-row[data-status="failed"] { border-left-color: var(--accent-bad); }
+.agent-job-row[data-status="pending"],
+.agent-job-row[data-status="claimed"] { border-left-color: var(--accent-warn); }
+.agent-job-detail { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; white-space: pre-wrap; }
+
+/* UI-21: Skeleton + button press */
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-elev-1) 25%, var(--bg-elev-2) 50%, var(--bg-elev-1) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+  border-radius: 10px;
+  height: 52px;
+  margin-bottom: var(--space-2);
+}
+@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.btn:active, .dump-item:active, .tab-btn:active { transform: scale(0.97); }
+
+/* UI-22: Delete confirm sheet */
+.confirm-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: end center;
+  background: rgba(0, 0, 0, 0.45);
+  padding: var(--space-4);
+}
+.confirm-sheet[hidden] { display: none !important; }
+.confirm-sheet-card {
+  width: min(420px, 100%);
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  padding: var(--space-5);
+  box-shadow: var(--shadow-glass);
+}
+.confirm-sheet-card[role="alertdialog"] { outline: none; }
+
+/* UI-23: Achievement unlock overlay */
+.achievement-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  animation: fadeIn 0.3s ease;
+}
+.achievement-overlay[hidden] { display: none !important; }
+.achievement-card {
+  text-align: center;
+  padding: var(--space-6);
+  background: var(--bg-elev-1);
+  border: 1px solid var(--accent-violet);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-glass);
+  animation: popIn 0.45s var(--ease-out-expo);
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes popIn { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.achievement-trophy { font-size: 3rem; display: block; margin-bottom: var(--space-3); }

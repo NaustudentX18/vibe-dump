@@ -16,6 +16,10 @@ const state = {
   traceRuns: [],
   pttTimerInterval: null,
   pttTimerStart: null,
+  dumpFilter: "",
+  dumpStatusFilter: "",
+  dumpSort: "newest",
+  theme: "auto",
 };
 
 const API = {
@@ -325,6 +329,99 @@ function getFocusableElements(container) {
   );
 }
 
+function relativeTime(iso) {
+  const then = new Date(iso.includes("Z") ? iso : `${iso}Z`).getTime();
+  const diff = Date.now() - then;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(then).toLocaleDateString();
+}
+
+function applyTheme(mode) {
+  state.theme = mode;
+  const root = document.documentElement;
+  if (mode === "auto") {
+    root.removeAttribute("data-theme");
+    localStorage.removeItem("vibedump-theme");
+  } else {
+    root.dataset.theme = mode;
+    localStorage.setItem("vibedump-theme", mode);
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = mode === "light" ? "#f4f6fb" : "#0b0f1a";
+}
+
+function initTheme() {
+  const saved = localStorage.getItem("vibedump-theme");
+  const mode = saved || "auto";
+  applyTheme(mode);
+  const sel = $("#themeToggle");
+  if (sel) sel.value = mode;
+}
+
+function showConfirmSheet(message, title = "Delete dump?") {
+  return new Promise((resolve) => {
+    const sheet = $("#confirmSheet");
+    const body = $("#confirmBody");
+    const ok = $("#confirmOk");
+    const cancel = $("#confirmCancel");
+    if (!sheet || !body || !ok || !cancel) {
+      resolve(window.confirm(message));
+      return;
+    }
+    $("#confirmTitle").textContent = title;
+    body.textContent = message;
+    sheet.hidden = false;
+    const cleanup = (val) => {
+      sheet.hidden = true;
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+      resolve(val);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+    cancel.focus();
+  });
+}
+
+function showAchievementOverlay(title, description) {
+  const overlay = $("#achievementOverlay");
+  const t = $("#achievementTitle");
+  const d = $("#achievementDesc");
+  const btn = $("#achievementDismiss");
+  if (!overlay || !t || !d) return;
+  t.textContent = title || "Achievement unlocked!";
+  d.textContent = description || "";
+  overlay.hidden = false;
+  const close = () => { overlay.hidden = true; };
+  btn?.addEventListener("click", close, { once: true });
+  setTimeout(close, 5000);
+}
+
+function getFilteredDumps() {
+  let items = [...state.dumps];
+  const q = state.dumpFilter.trim().toLowerCase();
+  if (q) items = items.filter((d) => d.title.toLowerCase().includes(q));
+  if (state.dumpStatusFilter) {
+    items = items.filter((d) => d.status === state.dumpStatusFilter);
+  }
+  if (state.dumpSort === "oldest") {
+    items.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  } else if (state.dumpSort === "title") {
+    items.sort((a, b) => a.title.localeCompare(b.title));
+  } else {
+    items.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+  return items;
+}
+
 function setMascotState(s) {
   const mascot = $("#mascot");
   const chip = $("#statusChip");
@@ -363,28 +460,47 @@ function renderDumps() {
     );
     return;
   }
-  for (const dump of state.dumps) {
+  const visible = getFilteredDumps();
+  if (visible.length === 0 && state.dumps.length > 0) {
+    list.appendChild(createEmptyState("No dumps match your filters.", null, null));
+    return;
+  }
+  for (const dump of visible) {
     const btn = document.createElement("button");
     btn.className = "dump-item" + (dump.id === state.selectedId ? " is-active" : "");
     btn.type = "button";
     btn.innerHTML = `
       <div class="title"></div>
       <div class="meta">
-        <span class="badge" data-status=""></span>
+        <span class="status-chip-sm" data-status=""></span>
         <span class="ts"></span>
       </div>`;
     btn.querySelector(".title").textContent = dump.title;
-    const badge = btn.querySelector(".badge");
+    const badge = btn.querySelector(".status-chip-sm");
     badge.dataset.status = dump.status;
     badge.textContent = dump.status;
-    btn.querySelector(".ts").textContent = new Date(dump.created_at + "Z").toLocaleString();
+    btn.querySelector(".ts").textContent = relativeTime(dump.created_at);
+    btn.title = new Date(dump.created_at + "Z").toLocaleString();
     btn.addEventListener("click", () => selectDump(dump.id));
     list.appendChild(btn);
   }
 }
 
+function showDumpListSkeleton() {
+  const list = $("#dumpList");
+  if (!list) return;
+  list.innerHTML = "";
+  for (let i = 0; i < 3; i++) {
+    const sk = document.createElement("div");
+    sk.className = "skeleton";
+    sk.setAttribute("aria-hidden", "true");
+    list.appendChild(sk);
+  }
+}
+
 async function loadDumps() {
   const list = $("#dumpList");
+  showDumpListSkeleton();
   try {
     const data = await api(API.dumps);
     state.dumps = data.items;
@@ -434,11 +550,12 @@ function renderDumpDetail(root, turnsRes, blueprintRes) {
   root.appendChild(backBtn);
 
   const transcript = document.createElement("div");
-  transcript.className = "transcript-list";
+  transcript.className = "chat-thread";
   const transcriptHeading = document.createElement("h3");
   transcriptHeading.textContent = "🗣 Transcript";
   root.appendChild(transcriptHeading);
   root.appendChild(transcript);
+  const profileName = (state.profile && state.profile.name) || "You";
   if (!turnsRes.items || turnsRes.items.length === 0) {
     transcript.appendChild(
       createEmptyState(
@@ -448,12 +565,22 @@ function renderDumpDetail(root, turnsRes, blueprintRes) {
     );
   } else {
     for (const t of turnsRes.items) {
-      const div = document.createElement("div");
-      div.className = `turn ${t.role}`;
-      div.innerHTML = `<div class="role"></div><div class="body"></div>`;
-      div.querySelector(".role").textContent = t.role;
-      div.querySelector(".body").textContent = t.text;
-      transcript.appendChild(div);
+      const bubble = document.createElement("div");
+      const isUser = t.role === "user";
+      bubble.className = `chat-bubble chat-bubble--${isUser ? "user" : "assistant"}`;
+      const avatar = document.createElement("div");
+      avatar.className = "chat-avatar";
+      avatar.textContent = isUser ? "🧑" : "💩";
+      const bodyWrap = document.createElement("div");
+      const body = document.createElement("div");
+      body.className = "chat-body";
+      body.textContent = t.text;
+      const meta = document.createElement("div");
+      meta.className = "chat-meta";
+      meta.textContent = `${isUser ? profileName : "Dumpi"} · ${relativeTime(t.created_at || new Date().toISOString())}`;
+      bodyWrap.append(body, meta);
+      bubble.append(avatar, bodyWrap);
+      transcript.appendChild(bubble);
     }
   }
 
@@ -505,7 +632,8 @@ function renderDumpDetail(root, turnsRes, blueprintRes) {
   delBtn.className = "btn";
   delBtn.textContent = "🗑 Delete";
   delBtn.addEventListener("click", async () => {
-    if (!confirm("Delete this dump?")) return;
+    const ok = await showConfirmSheet("This dump and its blueprint will be permanently removed.", "Delete dump?");
+    if (!ok) return;
     try {
       await api(API.dump(state.selectedId), { method: "DELETE" });
       state.selectedId = null;
@@ -786,7 +914,9 @@ function connectSSE() {
   });
   es.addEventListener("achievement.unlocked", (e) => {
     const data = JSON.parse(e.data).payload;
-    showToast(`🏆 ${data.title || data.key} unlocked`);
+    const title = data.title || data.key || "Achievement";
+    showToast(`🏆 ${title} unlocked`);
+    showAchievementOverlay(title, data.description || "");
     loadAchievements();
   });
   es.addEventListener("ptt.completed", (e) => {
@@ -1076,14 +1206,27 @@ function renderAgentJobs(jobs) {
   }
   for (const job of jobs) {
     const row = document.createElement("div");
-    row.className = "ach-row";
+    row.className = "agent-job-row";
+    row.dataset.status = job.status;
     const title = document.createElement("div");
     title.className = "ach-title";
     title.textContent = `${job.status} · ${job.kind} · ${(job.prompt || "").slice(0, 60)}`;
     const desc = document.createElement("div");
     desc.className = "ach-desc";
     const when = job.completed_at || job.claimed_at || job.created_at || "";
-    desc.textContent = `id ${job.id.slice(0, 8)} · attempts ${job.attempts}/${job.max_attempts} · ${when}`;
+    desc.textContent = `id ${job.id.slice(0, 8)} · attempts ${job.attempts}/${job.max_attempts} · ${relativeTime(when || new Date().toISOString())}`;
+    const detail = document.createElement("div");
+    detail.className = "agent-job-detail";
+    detail.hidden = true;
+    detail.textContent = [
+      job.prompt || "",
+      job.result ? `\n\nResult:\n${job.result}` : "",
+      job.error ? `\n\nError: ${job.error}` : "",
+    ].join("");
+    row.addEventListener("click", (ev) => {
+      if (ev.target.closest("button")) return;
+      detail.hidden = !detail.hidden;
+    });
     if (job.error) {
       const errLine = document.createElement("div");
       errLine.className = "ach-desc";
@@ -1093,6 +1236,7 @@ function renderAgentJobs(jobs) {
     }
     row.appendChild(title);
     row.appendChild(desc);
+    row.appendChild(detail);
     const actions = document.createElement("div");
     actions.className = "row-actions";
     if (job.status === "pending" || job.status === "claimed") {
@@ -1212,6 +1356,20 @@ function bindEvents() {
     if (q.length >= 2) runSearch(q);
     else if (q === "") loadDumps();
   });
+
+  $("#dumpFilterInput")?.addEventListener("input", (e) => {
+    state.dumpFilter = e.target.value;
+    renderDumps();
+  });
+  $("#dumpStatusFilter")?.addEventListener("change", (e) => {
+    state.dumpStatusFilter = e.target.value;
+    renderDumps();
+  });
+  $("#dumpSortSelect")?.addEventListener("change", (e) => {
+    state.dumpSort = e.target.value;
+    renderDumps();
+  });
+  $("#themeToggle")?.addEventListener("change", (e) => applyTheme(e.target.value));
 
   $("#newDumpForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1559,6 +1717,7 @@ async function init() {
   bindEvents();
   bindTabBar();
   initOnboarding();
+  initTheme();
   try {
     const idleImg = $("#mascotImg");
     if (idleImg) idleImg.src = API.mascot("idle");

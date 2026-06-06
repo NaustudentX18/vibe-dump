@@ -500,3 +500,38 @@ def test_dashboard_low_battery_banner_js(js: str) -> None:
 def test_dashboard_dumps_retry_js(js: str) -> None:
     assert "dumpsRetryBtn" in js, "dumpsRetryBtn id missing from dashboard.js"
     assert re.search(r"catch\s*\(", js), "loadDumps error catch block missing"
+
+
+# ---------------------------------------------------------------------------
+# UI-16–23: P2 polish
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_p2_theme_html(html: str) -> None:
+    assert 'id="themeToggle"' in html
+
+
+def test_dashboard_p2_dump_toolbar_html(html: str) -> None:
+    assert 'id="dumpFilterInput"' in html
+    assert 'id="dumpSortSelect"' in html
+
+
+def test_dashboard_p2_confirm_and_achievement_html(html: str) -> None:
+    assert 'id="confirmSheet"' in html
+    assert 'role="alertdialog"' in html
+    assert 'id="achievementOverlay"' in html
+
+
+def test_dashboard_p2_polish_js(js: str) -> None:
+    assert "applyTheme" in js
+    assert "showConfirmSheet" in js
+    assert "showAchievementOverlay" in js
+    assert "chat-bubble" in js
+    assert "getFilteredDumps" in js
+
+
+def test_dashboard_p2_polish_css(css: str) -> None:
+    assert "data-theme=\"light\"" in css or '[data-theme="light"]' in css
+    assert ".chat-bubble" in css
+    assert ".skeleton" in css
+    assert ".achievement-overlay" in css
