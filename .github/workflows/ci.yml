@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, "cursor/**"]
+    branches: [main, master]
   pull_request:
-    branches: [master]
+    branches: [main, master]
 
 jobs:
   test:
