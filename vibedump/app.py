@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Annotated, Any, Iterator
 from uuid import uuid4
 
-from .agent_pipeline import AgentPipeline
+from .active_listener import ListenerAction
+from .agent_pipeline import AgentPipeline, ListenerStepResult
 from .database import (
     AchievementRecord,
     BlueprintRecord,
@@ -71,6 +72,8 @@ DEFAULT_API_PREFIX = "/api"
 
 # M7 push-to-talk: write WAVs here so the STT layer can find them.
 PTT_TMP_DIR = Path(os.environ.get("VIBEDUMP_PTT_DIR", "/tmp"))
+PTT_SWEEP_INTERVAL_S = int(os.environ.get("VIBEDUMP_PTT_SWEEP_INTERVAL_S", "300"))
+PTT_SWEEP_MAX_AGE_S = int(os.environ.get("VIBEDUMP_PTT_SWEEP_MAX_AGE_S", "3600"))
 
 
 @dataclass(slots=True)
@@ -117,6 +120,8 @@ class AppState:
     # In-process PTT job registry. Keyed by ``uuid4().hex``.
     ptt_jobs: dict[str, PttJob] = field(default_factory=dict)
     ptt_lock: threading.Lock = field(default_factory=threading.Lock)
+    ptt_sweeper_stop: threading.Event | None = None
+    ptt_sweeper_thread: threading.Thread | None = None
     # M6 storage: rclone bridge, local data dir, and the in-memory snapshot
     # of the last export/sync timestamps + their results. The data dir is
     # only used as a parent for derived paths (exports/, audio/, etc.).
@@ -137,6 +142,8 @@ class AppState:
     agent_runtime_error: str | None = None
 
     def close(self) -> None:
+        if self.ptt_sweeper_stop is not None:
+            self.ptt_sweeper_stop.set()
         if self.pisugar_monitor is not None:
             try:
                 self.pisugar_monitor.stop()
@@ -372,6 +379,79 @@ def _battery_to_dict(reading: BatteryReading) -> dict[str, Any]:
     }
 
 
+def sweep_ptt_tmp_dir(
+    tmp_dir: Path | None = None,
+    *,
+    max_age_s: int = PTT_SWEEP_MAX_AGE_S,
+) -> int:
+    """Delete stale PTT/stream WAV files (HARD-03 sweeper)."""
+    directory = tmp_dir or PTT_TMP_DIR
+    if not directory.is_dir():
+        return 0
+    now = time.time()
+    removed = 0
+    for pattern in ("vibedump_ptt_*.wav", "vibedump_stream_*.wav"):
+        for path in directory.glob(pattern):
+            try:
+                if now - path.stat().st_mtime > max_age_s:
+                    path.unlink()
+                    removed += 1
+            except OSError:
+                pass
+    return removed
+
+
+def _ptt_sweeper_loop(stop_event: threading.Event) -> None:
+    while not stop_event.wait(PTT_SWEEP_INTERVAL_S):
+        try:
+            sweep_ptt_tmp_dir()
+        except Exception:
+            pass
+
+
+def _start_ptt_sweeper(state: AppState) -> None:
+    if state.ptt_sweeper_thread is not None:
+        return
+    stop = threading.Event()
+    thread = threading.Thread(
+        target=_ptt_sweeper_loop,
+        args=(stop,),
+        daemon=True,
+        name="ptt-sweeper",
+    )
+    thread.start()
+    state.ptt_sweeper_stop = stop
+    state.ptt_sweeper_thread = thread
+
+
+def _play_assistant_tts(state: AppState, text: str) -> None:
+    """Best-effort TTS playback after an [ASK] response (HW-08)."""
+    if not text or state.audio_playback is None:
+        return
+    try:
+        tts = next(iter(state.pipeline.registry.tts.values()), None)
+        if tts is None:
+            return
+        audio_bytes = tts.synthesize(text)
+        if audio_bytes[:4] == b"RIFF":
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp.write(audio_bytes)
+                path = tmp.name
+            try:
+                state.audio_playback.play_wav(path)
+            finally:
+                Path(path).unlink(missing_ok=True)
+        else:
+            state.audio_playback.play_pcm_bytes(audio_bytes)
+    except Exception:
+        pass
+
+
+def _maybe_play_ask_tts(state: AppState, result: ListenerStepResult) -> None:
+    if result.action == ListenerAction.ASK:
+        _play_assistant_tts(state, result.assistant_text)
+
+
 def create_app(state: AppState | None = None) -> Any:
     """Create the FastAPI app, wiring routes to the provided state."""
     try:
@@ -397,6 +477,7 @@ def create_app(state: AppState | None = None) -> Any:
     from fastapi.staticfiles import StaticFiles
 
     app_state = state or _create_default_state()
+    _start_ptt_sweeper(app_state)
     app = FastAPI(title="Vibe-Dump")
     app.state.vibedump = app_state
     if STATIC_DIR.is_dir():
@@ -536,6 +617,7 @@ def create_app(state: AppState | None = None) -> Any:
         try:
             st.pipeline.add_user_turn(dump_id, body.text)
             result = st.pipeline.step_listener(dump_id)
+            _maybe_play_ask_tts(st, result)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except ValueError as exc:
@@ -764,6 +846,8 @@ def create_app(state: AppState | None = None) -> Any:
 
             try:
                 app_state.pipeline.add_user_turn(dump_id, transcript)
+                listener_result = app_state.pipeline.step_listener(dump_id)
+                _maybe_play_ask_tts(app_state, listener_result)
             except Exception as exc:
                 job.status = "error"
                 job.error = f"add_user_turn failed: {exc}"
@@ -1383,7 +1467,8 @@ def create_app(state: AppState | None = None) -> Any:
             st.bus.publish("dump.user_turn", {"dump_id": dump_id, "text": transcript})
 
             try:
-                st.pipeline.step_listener(dump_id)
+                listener_result = st.pipeline.step_listener(dump_id)
+                _maybe_play_ask_tts(st, listener_result)
                 await websocket.send_json(
                     {
                         "type": "ack",

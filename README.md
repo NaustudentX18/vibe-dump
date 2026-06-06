@@ -10,7 +10,7 @@
 
 <br/>
 
-[![Tests Status](https://img.shields.io/badge/Tests-486%2B%20Passed-success?style=flat-square&logo=github&logoColor=white)](#testing)
+[![Tests Status](https://img.shields.io/badge/Tests-517%20Passed-success?style=flat-square&logo=github&logoColor=white)](#testing)
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
 [![Framework](https://img.shields.io/badge/FastAPI-0.118+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Agent Engine](https://img.shields.io/badge/Pydantic--AI-v1.0-FF4081?style=flat-square&logo=pydantic&logoColor=white)](https://ai.pydantic.dev)

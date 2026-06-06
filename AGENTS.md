@@ -14,13 +14,18 @@ Vibe-Dump is a single-process Python FastAPI app: voice-dump → AI spec compile
 | SQLite | Bundled | Auto-created at `data/vibedump.sqlite3` on startup |
 | Pi hardware (Whisplay, PiSugar) | No | Only on Raspberry Pi |
 
+### Git workflow (swarm / multi-wave work)
+
+- **Push often:** After each logical wave or testable chunk, commit and `git push -u origin cursor/<name>-f243`. Keep the PR updated.
+- **Merge once:** Merge into `master` only when gates pass (`pytest` green, roadmap QA for that wave). Leave PRs **draft** until then.
+
 ### Standard commands
 
 See `README.md` and `docs/INSTALL.md` for canonical setup. Quick reference:
 
 ```bash
 source .venv/bin/activate
-python -m pytest          # 440 tests; install Pillow for mascot suite
+python -m pytest          # 512+ tests; install Pillow for mascot suite
 python -m ruff check vibedump tests   # ruff not pinned in pyproject; install separately
 ./scripts/run_dev.sh      # dashboard at http://127.0.0.1:8080
 ```

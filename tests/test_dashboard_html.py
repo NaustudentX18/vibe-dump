@@ -298,3 +298,240 @@ def test_dashboard_empty_state_css(css: str) -> None:
 
 def test_dashboard_md_body_css(css: str) -> None:
     assert ".md-body" in css, ".md-body CSS rule missing"
+
+
+# ---------------------------------------------------------------------------
+# UI-02: Section chips after blueprint markdown
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_section_chips_js(js: str) -> None:
+    assert "buildSectionChips" in js, "buildSectionChips function missing from dashboard.js"
+    assert "section-chip" in js, "section-chip class reference missing from dashboard.js"
+    assert "section-chip--muted" in js, "section-chip--muted class missing (TBD muting)"
+    assert "section-chip--count" in js, "section-chip--count class missing from dashboard.js"
+
+
+def test_dashboard_section_chips_css(css: str) -> None:
+    assert ".section-chips" in css, ".section-chips CSS rule missing"
+    assert ".section-chip" in css, ".section-chip CSS rule missing"
+    assert ".section-chip--count" in css, ".section-chip--count CSS rule missing"
+    assert ".section-chip--muted" in css, ".section-chip--muted CSS rule missing"
+
+
+# ---------------------------------------------------------------------------
+# UI-03/04: PTT hold button promoted; recording bars animation
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_ptt_primary_html(html: str) -> None:
+    assert 'class="btn ptt-primary"' in html or 'ptt-primary' in html, \
+        "pttHoldBtn must have ptt-primary class"
+    assert 'id="recordBtn"' in html, "recordBtn element must still exist in HTML"
+    assert re.search(r'id="recordBtn"[^>]*hidden', html) or \
+           re.search(r'hidden[^>]*id="recordBtn"', html), \
+        "recordBtn must be hidden"
+    assert 'class="ptt-bars"' in html, "ptt-bars span missing from pttHoldBtn"
+    assert 'id="pttTimer"' in html, "#pttTimer element missing"
+
+
+def test_dashboard_ptt_timer_js(js: str) -> None:
+    assert "startPttTimer" in js, "startPttTimer function missing from dashboard.js"
+    assert "stopPttTimer" in js, "stopPttTimer function missing from dashboard.js"
+    assert "pttTimerInterval" in js, "pttTimerInterval state missing from dashboard.js"
+    assert "navigator.vibrate" in js, "navigator.vibrate call missing from dashboard.js"
+
+
+def test_dashboard_ptt_bars_css(css: str) -> None:
+    assert ".ptt-bars" in css, ".ptt-bars CSS rule missing"
+    assert "ptt-primary" in css, ".ptt-primary CSS rule missing"
+    assert "ptt-bar" in css, "ptt-bar keyframe animation missing from CSS"
+
+
+# ---------------------------------------------------------------------------
+# UI-08: Bottom tab bar
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_bottom_tab_bar_html(html: str) -> None:
+    assert 'id="bottomTabBar"' in html, "#bottomTabBar element missing"
+    assert 'bottom-tab-bar' in html, ".bottom-tab-bar class missing"
+    assert 'data-tab="dumps"' in html, "Dumps tab missing"
+    assert 'data-tab="record"' in html, "Record tab missing"
+    assert 'data-tab="search"' in html, "Search tab missing"
+    assert 'data-tab="settings"' in html, "Settings tab missing"
+
+
+def test_dashboard_bottom_tab_bar_css(css: str) -> None:
+    assert ".bottom-tab-bar" in css, ".bottom-tab-bar CSS rule missing"
+    assert ".tab-btn" in css, ".tab-btn CSS rule missing"
+
+
+def test_dashboard_tab_bar_js(js: str) -> None:
+    assert "bindTabBar" in js, "bindTabBar function missing from dashboard.js"
+
+
+# ---------------------------------------------------------------------------
+# UI-09: Back button in detail card on mobile
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_detail_back_btn_js(js: str) -> None:
+    assert "detailBackBtn" in js, "detailBackBtn missing from dashboard.js"
+    assert "detail-back-btn" in js, "detail-back-btn class missing from dashboard.js"
+
+
+def test_dashboard_detail_back_btn_css(css: str) -> None:
+    assert ".detail-back-btn" in css, ".detail-back-btn CSS rule missing"
+    assert "max-width: 899px" in css or "899px" in css, \
+        "mobile breakpoint for detail-back-btn missing"
+
+
+# ---------------------------------------------------------------------------
+# UI-11: XP bar + streak in mascot panel
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_mascot_xp_html(html: str) -> None:
+    assert 'id="mascotXp"' in html, "#mascotXp element missing"
+    assert 'id="mascotXpFill"' in html, "#mascotXpFill element missing"
+    assert 'id="mascotStreak"' in html, "#mascotStreak element missing"
+
+
+def test_dashboard_mascot_xp_css(css: str) -> None:
+    assert ".mascot-xp" in css, ".mascot-xp CSS rule missing"
+    assert ".mascot-streak" in css, ".mascot-streak CSS rule missing"
+
+
+def test_dashboard_mascot_xp_js(js: str) -> None:
+    assert "mascotXpFill" in js, "mascotXpFill reference missing from dashboard.js"
+    assert "mascotStreak" in js, "mascotStreak reference missing from dashboard.js"
+
+
+# ---------------------------------------------------------------------------
+# UI-12: Kind badge + ok/error text in provider health rows
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_kind_badge_js(js: str) -> None:
+    assert "kind-badge" in js, "kind-badge class reference missing from dashboard.js"
+    assert "health-status" in js, "health-status class reference missing from dashboard.js"
+    assert "configMap" in js, "configMap (config lookup) missing from dashboard.js"
+
+
+def test_dashboard_kind_badge_css(css: str) -> None:
+    assert ".kind-badge" in css, ".kind-badge CSS rule missing"
+    assert ".kind-badge--stt" in css, ".kind-badge--stt CSS rule missing"
+    assert ".kind-badge--llm" in css, ".kind-badge--llm CSS rule missing"
+    assert ".kind-badge--tts" in css, ".kind-badge--tts CSS rule missing"
+    assert ".health-status--ok" in css, ".health-status--ok CSS rule missing"
+    assert ".health-status--error" in css, ".health-status--error CSS rule missing"
+
+
+# ---------------------------------------------------------------------------
+# UI-14: First-run onboarding overlay
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_onboarding_html(html: str) -> None:
+    assert 'id="onboardingOverlay"' in html, "#onboardingOverlay element missing"
+    assert 'id="onboardingPrev"' in html, "#onboardingPrev button missing"
+    assert 'id="onboardingNext"' in html, "#onboardingNext button missing"
+    assert 'id="onboardingDone"' in html, "#onboardingDone button missing"
+    assert 'id="onboardingDots"' in html, "#onboardingDots element missing"
+
+
+def test_dashboard_onboarding_js(js: str) -> None:
+    assert "initOnboarding" in js, "initOnboarding function missing from dashboard.js"
+    assert "vibedump.onboarded" in js, "vibedump.onboarded localStorage key missing"
+
+
+def test_dashboard_onboarding_css(css: str) -> None:
+    assert ".onboarding-overlay" in css, ".onboarding-overlay CSS rule missing"
+    assert ".onboarding-card" in css, ".onboarding-card CSS rule missing"
+    assert ".onboarding-dot" in css, ".onboarding-dot CSS rule missing"
+
+
+# ---------------------------------------------------------------------------
+# M10-02: Swarm panel in settings drawer
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_swarm_panel_html(html: str) -> None:
+    assert 'id="swarmPanel"' in html, "#swarmPanel element missing"
+    assert 'id="swarmNodeList"' in html, "#swarmNodeList element missing"
+
+
+def test_dashboard_swarm_sse_js(js: str) -> None:
+    assert "swarm.started" in js, "swarm.started SSE handler missing from dashboard.js"
+    assert "swarm.node_done" in js, "swarm.node_done SSE handler missing from dashboard.js"
+    assert "swarm.completed" in js, "swarm.completed SSE handler missing from dashboard.js"
+    assert "renderSwarmNode" in js, "renderSwarmNode function missing from dashboard.js"
+
+
+def test_dashboard_swarm_css(css: str) -> None:
+    assert ".swarm-node-row" in css, ".swarm-node-row CSS rule missing"
+
+
+# ---------------------------------------------------------------------------
+# HW-12: Low battery banner
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_low_battery_banner_html(html: str) -> None:
+    assert 'id="lowBatteryBanner"' in html, "#lowBatteryBanner element missing"
+    assert 'low-battery-banner' in html, ".low-battery-banner class missing"
+
+
+def test_dashboard_low_battery_banner_css(css: str) -> None:
+    assert ".low-battery-banner" in css, ".low-battery-banner CSS rule missing"
+
+
+def test_dashboard_low_battery_banner_js(js: str) -> None:
+    assert "lowBatteryBanner" in js, "lowBatteryBanner reference missing from dashboard.js"
+    assert "pct >= 15" in js, "battery < 15 threshold missing from dashboard.js"
+
+
+# ---------------------------------------------------------------------------
+# Inline retry on loadDumps failure
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_dumps_retry_js(js: str) -> None:
+    assert "dumpsRetryBtn" in js, "dumpsRetryBtn id missing from dashboard.js"
+    assert re.search(r"catch\s*\(", js), "loadDumps error catch block missing"
+
+
+# ---------------------------------------------------------------------------
+# UI-16–23: P2 polish
+# ---------------------------------------------------------------------------
+
+
+def test_dashboard_p2_theme_html(html: str) -> None:
+    assert 'id="themeToggle"' in html
+
+
+def test_dashboard_p2_dump_toolbar_html(html: str) -> None:
+    assert 'id="dumpFilterInput"' in html
+    assert 'id="dumpSortSelect"' in html
+
+
+def test_dashboard_p2_confirm_and_achievement_html(html: str) -> None:
+    assert 'id="confirmSheet"' in html
+    assert 'role="alertdialog"' in html
+    assert 'id="achievementOverlay"' in html
+
+
+def test_dashboard_p2_polish_js(js: str) -> None:
+    assert "applyTheme" in js
+    assert "showConfirmSheet" in js
+    assert "showAchievementOverlay" in js
+    assert "chat-bubble" in js
+    assert "getFilteredDumps" in js
+
+
+def test_dashboard_p2_polish_css(css: str) -> None:
+    assert "data-theme=\"light\"" in css or '[data-theme="light"]' in css
+    assert ".chat-bubble" in css
+    assert ".skeleton" in css
+    assert ".achievement-overlay" in css

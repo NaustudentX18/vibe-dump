@@ -14,6 +14,12 @@ const state = {
   pttJobId: null,
   pttPollTimer: null,
   traceRuns: [],
+  pttTimerInterval: null,
+  pttTimerStart: null,
+  dumpFilter: "",
+  dumpStatusFilter: "",
+  dumpSort: "newest",
+  theme: "auto",
 };
 
 const API = {
@@ -166,6 +172,44 @@ function renderMarkdown(md) {
 }
 
 // ---------------------------------------------------------------------------
+// UI-02: Section chips — horizontal scrollable TOC from ## headings
+// ---------------------------------------------------------------------------
+
+function buildSectionChips(md, mdBodyEl) {
+  const sections = [];
+  for (const line of md.split("\n")) {
+    const m = line.match(/^## (.+)/);
+    if (m) sections.push(m[1]);
+  }
+  if (!sections.length) return null;
+
+  const wrap = document.createElement("div");
+  wrap.className = "section-chips";
+
+  const countChip = document.createElement("span");
+  countChip.className = "section-chip section-chip--count";
+  countChip.textContent = `${sections.length}/12 sections`;
+  wrap.appendChild(countChip);
+
+  for (const title of sections) {
+    const chip = document.createElement("button");
+    chip.className = "section-chip";
+    chip.type = "button";
+    chip.textContent = title;
+    if (/\bTBD\b/i.test(title)) chip.classList.add("section-chip--muted");
+    chip.addEventListener("click", () => {
+      if (!mdBodyEl) return;
+      const hs = Array.from(mdBodyEl.querySelectorAll(".md-body h2"));
+      const stripped = title.replace(/^\d+\.\s*/, "").toLowerCase();
+      const target = hs.find((h) => h.textContent.toLowerCase().includes(stripped));
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    wrap.appendChild(chip);
+  }
+  return wrap;
+}
+
+// ---------------------------------------------------------------------------
 // P0-4: Empty state helper — Dumpi image + message + optional CTA button
 // ---------------------------------------------------------------------------
 
@@ -285,6 +329,99 @@ function getFocusableElements(container) {
   );
 }
 
+function relativeTime(iso) {
+  const then = new Date(iso.includes("Z") ? iso : `${iso}Z`).getTime();
+  const diff = Date.now() - then;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(then).toLocaleDateString();
+}
+
+function applyTheme(mode) {
+  state.theme = mode;
+  const root = document.documentElement;
+  if (mode === "auto") {
+    root.removeAttribute("data-theme");
+    localStorage.removeItem("vibedump-theme");
+  } else {
+    root.dataset.theme = mode;
+    localStorage.setItem("vibedump-theme", mode);
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = mode === "light" ? "#f4f6fb" : "#0b0f1a";
+}
+
+function initTheme() {
+  const saved = localStorage.getItem("vibedump-theme");
+  const mode = saved || "auto";
+  applyTheme(mode);
+  const sel = $("#themeToggle");
+  if (sel) sel.value = mode;
+}
+
+function showConfirmSheet(message, title = "Delete dump?") {
+  return new Promise((resolve) => {
+    const sheet = $("#confirmSheet");
+    const body = $("#confirmBody");
+    const ok = $("#confirmOk");
+    const cancel = $("#confirmCancel");
+    if (!sheet || !body || !ok || !cancel) {
+      resolve(window.confirm(message));
+      return;
+    }
+    $("#confirmTitle").textContent = title;
+    body.textContent = message;
+    sheet.hidden = false;
+    const cleanup = (val) => {
+      sheet.hidden = true;
+      ok.removeEventListener("click", onOk);
+      cancel.removeEventListener("click", onCancel);
+      resolve(val);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    ok.addEventListener("click", onOk);
+    cancel.addEventListener("click", onCancel);
+    cancel.focus();
+  });
+}
+
+function showAchievementOverlay(title, description) {
+  const overlay = $("#achievementOverlay");
+  const t = $("#achievementTitle");
+  const d = $("#achievementDesc");
+  const btn = $("#achievementDismiss");
+  if (!overlay || !t || !d) return;
+  t.textContent = title || "Achievement unlocked!";
+  d.textContent = description || "";
+  overlay.hidden = false;
+  const close = () => { overlay.hidden = true; };
+  btn?.addEventListener("click", close, { once: true });
+  setTimeout(close, 5000);
+}
+
+function getFilteredDumps() {
+  let items = [...state.dumps];
+  const q = state.dumpFilter.trim().toLowerCase();
+  if (q) items = items.filter((d) => d.title.toLowerCase().includes(q));
+  if (state.dumpStatusFilter) {
+    items = items.filter((d) => d.status === state.dumpStatusFilter);
+  }
+  if (state.dumpSort === "oldest") {
+    items.sort((a, b) => a.created_at.localeCompare(b.created_at));
+  } else if (state.dumpSort === "title") {
+    items.sort((a, b) => a.title.localeCompare(b.title));
+  } else {
+    items.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  }
+  return items;
+}
+
 function setMascotState(s) {
   const mascot = $("#mascot");
   const chip = $("#statusChip");
@@ -323,30 +460,57 @@ function renderDumps() {
     );
     return;
   }
-  for (const dump of state.dumps) {
+  const visible = getFilteredDumps();
+  if (visible.length === 0 && state.dumps.length > 0) {
+    list.appendChild(createEmptyState("No dumps match your filters.", null, null));
+    return;
+  }
+  for (const dump of visible) {
     const btn = document.createElement("button");
     btn.className = "dump-item" + (dump.id === state.selectedId ? " is-active" : "");
     btn.type = "button";
     btn.innerHTML = `
       <div class="title"></div>
       <div class="meta">
-        <span class="badge" data-status=""></span>
+        <span class="status-chip-sm" data-status=""></span>
         <span class="ts"></span>
       </div>`;
     btn.querySelector(".title").textContent = dump.title;
-    const badge = btn.querySelector(".badge");
+    const badge = btn.querySelector(".status-chip-sm");
     badge.dataset.status = dump.status;
     badge.textContent = dump.status;
-    btn.querySelector(".ts").textContent = new Date(dump.created_at + "Z").toLocaleString();
+    btn.querySelector(".ts").textContent = relativeTime(dump.created_at);
+    btn.title = new Date(dump.created_at + "Z").toLocaleString();
     btn.addEventListener("click", () => selectDump(dump.id));
     list.appendChild(btn);
   }
 }
 
+function showDumpListSkeleton() {
+  const list = $("#dumpList");
+  if (!list) return;
+  list.innerHTML = "";
+  for (let i = 0; i < 3; i++) {
+    const sk = document.createElement("div");
+    sk.className = "skeleton";
+    sk.setAttribute("aria-hidden", "true");
+    list.appendChild(sk);
+  }
+}
+
 async function loadDumps() {
-  const data = await api(API.dumps);
-  state.dumps = data.items;
-  renderDumps();
+  const list = $("#dumpList");
+  showDumpListSkeleton();
+  try {
+    const data = await api(API.dumps);
+    state.dumps = data.items;
+    renderDumps();
+  } catch (e) {
+    list.innerHTML = "";
+    const errDiv = createEmptyState(`Failed to load dumps: ${e.message}`, "↻ Retry", loadDumps);
+    errDiv.querySelector("button").id = "dumpsRetryBtn";
+    list.appendChild(errDiv);
+  }
 }
 
 async function selectDump(id) {
@@ -368,12 +532,30 @@ async function selectDump(id) {
 
 function renderDumpDetail(root, turnsRes, blueprintRes) {
   root.innerHTML = "";
+
+  // UI-09: back button shown on mobile (<900px)
+  const backBtn = document.createElement("button");
+  backBtn.className = "btn detail-back-btn";
+  backBtn.id = "detailBackBtn";
+  backBtn.type = "button";
+  backBtn.textContent = "← Back";
+  backBtn.addEventListener("click", () => {
+    if (window.innerWidth < 900) {
+      state.selectedId = null;
+      renderDumps();
+      root.className = "empty";
+      root.textContent = "Pick a dump to see transcript + blueprint.";
+    }
+  });
+  root.appendChild(backBtn);
+
   const transcript = document.createElement("div");
-  transcript.className = "transcript-list";
+  transcript.className = "chat-thread";
   const transcriptHeading = document.createElement("h3");
   transcriptHeading.textContent = "🗣 Transcript";
   root.appendChild(transcriptHeading);
   root.appendChild(transcript);
+  const profileName = (state.profile && state.profile.name) || "You";
   if (!turnsRes.items || turnsRes.items.length === 0) {
     transcript.appendChild(
       createEmptyState(
@@ -383,12 +565,22 @@ function renderDumpDetail(root, turnsRes, blueprintRes) {
     );
   } else {
     for (const t of turnsRes.items) {
-      const div = document.createElement("div");
-      div.className = `turn ${t.role}`;
-      div.innerHTML = `<div class="role"></div><div class="body"></div>`;
-      div.querySelector(".role").textContent = t.role;
-      div.querySelector(".body").textContent = t.text;
-      transcript.appendChild(div);
+      const bubble = document.createElement("div");
+      const isUser = t.role === "user";
+      bubble.className = `chat-bubble chat-bubble--${isUser ? "user" : "assistant"}`;
+      const avatar = document.createElement("div");
+      avatar.className = "chat-avatar";
+      avatar.textContent = isUser ? "🧑" : "💩";
+      const bodyWrap = document.createElement("div");
+      const body = document.createElement("div");
+      body.className = "chat-body";
+      body.textContent = t.text;
+      const meta = document.createElement("div");
+      meta.className = "chat-meta";
+      meta.textContent = `${isUser ? profileName : "Dumpi"} · ${relativeTime(t.created_at || new Date().toISOString())}`;
+      bodyWrap.append(body, meta);
+      bubble.append(avatar, bodyWrap);
+      transcript.appendChild(bubble);
     }
   }
 
@@ -410,6 +602,9 @@ function renderDumpDetail(root, turnsRes, blueprintRes) {
     const mdDiv = document.createElement("div");
     mdDiv.className = "md-body";
     mdDiv.innerHTML = renderMarkdown(blueprintRes.markdown);
+    // UI-02: section chips before the markdown body
+    const chips = buildSectionChips(blueprintRes.markdown, mdDiv);
+    if (chips) bp.appendChild(chips);
     bp.appendChild(mdDiv);
     const copyBtn = document.createElement("button");
     copyBtn.className = "btn";
@@ -437,7 +632,8 @@ function renderDumpDetail(root, turnsRes, blueprintRes) {
   delBtn.className = "btn";
   delBtn.textContent = "🗑 Delete";
   delBtn.addEventListener("click", async () => {
-    if (!confirm("Delete this dump?")) return;
+    const ok = await showConfirmSheet("This dump and its blueprint will be permanently removed.", "Delete dump?");
+    if (!ok) return;
     try {
       await api(API.dump(state.selectedId), { method: "DELETE" });
       state.selectedId = null;
@@ -461,11 +657,16 @@ async function loadProviders() {
     return;
   }
   nav.textContent = `${data.health.length} providers loaded`;
+  // UI-12: build name→config map for kind badge
+  const configMap = {};
+  for (const c of (data.configs || [])) configMap[c.name] = c;
   for (const h of data.health) {
     const row = document.createElement("div");
     row.className = "health-row";
     row.dataset.ok = String(h.ok);
-    row.innerHTML = `<span class="health-dot"></span><span class="name"></span><span class="detail"></span>`;
+    const kind = (configMap[h.name] && configMap[h.name].kind) || "";
+    const statusText = h.ok ? "ok" : "error";
+    row.innerHTML = `<span class="health-dot"></span>${kind ? `<span class="kind-badge kind-badge--${kind}">${kind.toUpperCase()}</span>` : ""}<span class="name"></span><span class="health-status health-status--${statusText}">${statusText}</span><span class="detail"></span>`;
     row.querySelector(".name").textContent = h.name;
     row.querySelector(".detail").textContent = h.detail || "";
     list.appendChild(row);
@@ -496,6 +697,15 @@ function renderProfile() {
   const info = $("#xpInfo");
   if (info) {
     info.textContent = `Lvl ${p.level} · ${p.xp} XP · ${p.xp_to_next_level} to next · 🔥 ${p.streak_days}d streak`;
+  }
+  // UI-11: mascot panel XP bar + streak
+  const mascotXp = $("#mascotXp");
+  const mascotXpFill = $("#mascotXpFill");
+  const mascotStreak = $("#mascotStreak");
+  if (mascotXp) {
+    if (mascotXpFill) mascotXpFill.style.width = `${xpInLevel}%`;
+    if (mascotStreak) mascotStreak.textContent = `🔥 ${p.streak_days}d streak`;
+    mascotXp.hidden = false;
   }
 }
 
@@ -704,7 +914,9 @@ function connectSSE() {
   });
   es.addEventListener("achievement.unlocked", (e) => {
     const data = JSON.parse(e.data).payload;
-    showToast(`🏆 ${data.title || data.key} unlocked`);
+    const title = data.title || data.key || "Achievement";
+    showToast(`🏆 ${title} unlocked`);
+    showAchievementOverlay(title, data.description || "");
     loadAchievements();
   });
   es.addEventListener("ptt.completed", (e) => {
@@ -719,6 +931,7 @@ function connectSSE() {
       showToast("🎙 PTT captured nothing");
     }
     stopPttPolling();
+    stopPttTimer();
     state.pttJobId = null;
     const pttBtn = $("#pttHoldBtn");
     if (pttBtn) {
@@ -781,6 +994,27 @@ function connectSSE() {
       // Telemetry is best-effort; never break SSE handling.
     }
   });
+  // M10-02: Swarm events
+  es.addEventListener("swarm.started", (e) => {
+    try {
+      const data = JSON.parse(e.data).payload || {};
+      showToast(`🐝 Swarm ${(data.swarm_id || "").slice(0, 8)} started`);
+      renderSwarmNode({ type: "started", ...data });
+    } catch (_) {}
+  });
+  es.addEventListener("swarm.node_done", (e) => {
+    try {
+      const data = JSON.parse(e.data).payload || {};
+      renderSwarmNode({ type: "node_done", ...data });
+    } catch (_) {}
+  });
+  es.addEventListener("swarm.completed", (e) => {
+    try {
+      const data = JSON.parse(e.data).payload || {};
+      showToast("🐝 Swarm completed");
+      renderSwarmNode({ type: "completed", ...data });
+    } catch (_) {}
+  });
   es.onerror = () => {
     setSSEStatus("error");
     setTimeout(connectSSE, 3000);
@@ -792,6 +1026,31 @@ function stopPttPolling() {
     clearInterval(state.pttPollTimer);
     state.pttPollTimer = null;
   }
+}
+
+// UI-03/04: Recording timer helpers
+function startPttTimer() {
+  stopPttTimer();
+  state.pttTimerStart = Date.now();
+  const timerEl = $("#pttTimer");
+  if (timerEl) timerEl.hidden = false;
+  state.pttTimerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - state.pttTimerStart) / 1000);
+    const m = Math.floor(elapsed / 60);
+    const s = elapsed % 60;
+    const el = $("#pttTimer");
+    if (el) el.textContent = `${m}:${String(s).padStart(2, "0")}`;
+  }, 250);
+}
+
+function stopPttTimer() {
+  if (state.pttTimerInterval) {
+    clearInterval(state.pttTimerInterval);
+    state.pttTimerInterval = null;
+  }
+  state.pttTimerStart = null;
+  const timerEl = $("#pttTimer");
+  if (timerEl) timerEl.hidden = true;
 }
 
 function startPttPolling(jobId) {
@@ -809,6 +1068,7 @@ function startPttPolling(jobId) {
         } else {
           showToast("🎙 PTT captured nothing");
         }
+        stopPttTimer();
         state.pttJobId = null;
         const pttBtn = $("#pttHoldBtn");
         if (pttBtn) {
@@ -819,6 +1079,7 @@ function startPttPolling(jobId) {
       }
     } catch (e) {
       stopPttPolling();
+      stopPttTimer();
     }
   }, 500);
 }
@@ -910,6 +1171,28 @@ function renderTracePanel() {
   }
 }
 
+// M10-02: Render a swarm event into the swarm panel
+function renderSwarmNode(event) {
+  const list = $("#swarmNodeList");
+  if (!list) return;
+  const empty = list.querySelector(".empty");
+  if (empty) empty.remove();
+  const row = document.createElement("div");
+  row.className = "swarm-node-row";
+  const icons = { started: "🐝", node_done: "✅", completed: "🎉" };
+  const title = document.createElement("div");
+  title.style.fontWeight = "600";
+  title.textContent = `${icons[event.type] || "·"} ${event.type}${event.node_id ? ` · ${event.node_id}` : ""}`;
+  const desc = document.createElement("div");
+  desc.style.color = "var(--text-muted)";
+  desc.textContent = event.result
+    ? String(event.result).slice(0, 80)
+    : (event.swarm_id || "").slice(0, 16);
+  row.appendChild(title);
+  row.appendChild(desc);
+  list.insertBefore(row, list.firstChild);
+}
+
 function renderAgentJobs(jobs) {
   const root = $("#agentJobList");
   if (!root) return;
@@ -923,14 +1206,27 @@ function renderAgentJobs(jobs) {
   }
   for (const job of jobs) {
     const row = document.createElement("div");
-    row.className = "ach-row";
+    row.className = "agent-job-row";
+    row.dataset.status = job.status;
     const title = document.createElement("div");
     title.className = "ach-title";
     title.textContent = `${job.status} · ${job.kind} · ${(job.prompt || "").slice(0, 60)}`;
     const desc = document.createElement("div");
     desc.className = "ach-desc";
     const when = job.completed_at || job.claimed_at || job.created_at || "";
-    desc.textContent = `id ${job.id.slice(0, 8)} · attempts ${job.attempts}/${job.max_attempts} · ${when}`;
+    desc.textContent = `id ${job.id.slice(0, 8)} · attempts ${job.attempts}/${job.max_attempts} · ${relativeTime(when || new Date().toISOString())}`;
+    const detail = document.createElement("div");
+    detail.className = "agent-job-detail";
+    detail.hidden = true;
+    detail.textContent = [
+      job.prompt || "",
+      job.result ? `\n\nResult:\n${job.result}` : "",
+      job.error ? `\n\nError: ${job.error}` : "",
+    ].join("");
+    row.addEventListener("click", (ev) => {
+      if (ev.target.closest("button")) return;
+      detail.hidden = !detail.hidden;
+    });
     if (job.error) {
       const errLine = document.createElement("div");
       errLine.className = "ach-desc";
@@ -940,6 +1236,7 @@ function renderAgentJobs(jobs) {
     }
     row.appendChild(title);
     row.appendChild(desc);
+    row.appendChild(detail);
     const actions = document.createElement("div");
     actions.className = "row-actions";
     if (job.status === "pending" || job.status === "claimed") {
@@ -1003,6 +1300,7 @@ async function submitAgentJob(ev) {
 
 async function loadBattery() {
   const widget = $("#batteryWidget");
+  const banner = $("#lowBatteryBanner");
   if (!widget) return;
   try {
     const data = await api(API.hardwarePisugar);
@@ -1010,9 +1308,12 @@ async function loadBattery() {
     const charging = data.is_charging ? " ⚡" : "";
     widget.textContent = `🔋 ${pct}%${charging}`;
     widget.hidden = false;
+    // HW-12: show low battery banner when < 15% and not charging
+    if (banner) banner.hidden = data.is_charging || pct >= 15;
   } catch (_) {
     // 404 or 503 means PiSugar is not present — hide widget silently
     widget.hidden = true;
+    if (banner) banner.hidden = true;
   }
 }
 
@@ -1055,6 +1356,20 @@ function bindEvents() {
     if (q.length >= 2) runSearch(q);
     else if (q === "") loadDumps();
   });
+
+  $("#dumpFilterInput")?.addEventListener("input", (e) => {
+    state.dumpFilter = e.target.value;
+    renderDumps();
+  });
+  $("#dumpStatusFilter")?.addEventListener("change", (e) => {
+    state.dumpStatusFilter = e.target.value;
+    renderDumps();
+  });
+  $("#dumpSortSelect")?.addEventListener("change", (e) => {
+    state.dumpSort = e.target.value;
+    renderDumps();
+  });
+  $("#themeToggle")?.addEventListener("change", (e) => applyTheme(e.target.value));
 
   $("#newDumpForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -1134,6 +1449,9 @@ function bindPttButton() {
     if (state.pttJobId) return;
     btn.classList.add("is-ptt-active");
     btn.setAttribute("aria-pressed", "true");
+    // UI-03: optional haptic feedback + recording timer
+    if (navigator.vibrate) navigator.vibrate(30);
+    startPttTimer();
     try {
       const res = await api(API.pttStart, {
         method: "POST",
@@ -1144,11 +1462,13 @@ function bindPttButton() {
     } catch (err) {
       btn.classList.remove("is-ptt-active");
       btn.setAttribute("aria-pressed", "false");
+      stopPttTimer();
       showToast(`🎙 PTT start failed: ${err.message}`, "error");
     }
   };
   const onEnd = async (ev) => {
     ev.preventDefault();
+    stopPttTimer();
     if (!state.pttJobId) {
       btn.classList.remove("is-ptt-active");
       btn.setAttribute("aria-pressed", "false");
@@ -1331,8 +1651,73 @@ function bindStorageEvents() {
   });
 }
 
+// UI-14: First-run onboarding overlay
+function initOnboarding() {
+  if (localStorage.getItem("vibedump.onboarded")) return;
+  const overlay = $("#onboardingOverlay");
+  if (!overlay) return;
+  overlay.hidden = false;
+
+  let step = 0;
+  const steps = $$(".onboarding-step");
+  const dots = $$(".onboarding-dot");
+  const prevBtn = $("#onboardingPrev");
+  const nextBtn = $("#onboardingNext");
+  const doneBtn = $("#onboardingDone");
+
+  function goTo(n) {
+    if (steps[step]) steps[step].hidden = true;
+    if (dots[step]) dots[step].classList.remove("is-active");
+    step = n;
+    if (steps[step]) steps[step].hidden = false;
+    if (dots[step]) dots[step].classList.add("is-active");
+    if (prevBtn) prevBtn.hidden = step === 0;
+    if (nextBtn) nextBtn.hidden = step === steps.length - 1;
+    if (doneBtn) doneBtn.hidden = step !== steps.length - 1;
+  }
+
+  if (prevBtn) prevBtn.addEventListener("click", () => { if (step > 0) goTo(step - 1); });
+  if (nextBtn) nextBtn.addEventListener("click", () => { if (step < steps.length - 1) goTo(step + 1); });
+  if (doneBtn) doneBtn.addEventListener("click", () => {
+    localStorage.setItem("vibedump.onboarded", "1");
+    overlay.hidden = true;
+  });
+
+  goTo(0);
+}
+
+// UI-08: Bottom tab bar navigation
+function bindTabBar() {
+  const tabBtns = $$(".tab-btn");
+  const pttBtn = $("#pttHoldBtn");
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const tab = btn.dataset.tab;
+      if (tab === "record") {
+        // Record tab: delegate to PTT button (focus / trigger area)
+        if (pttBtn) pttBtn.focus();
+        return;
+      }
+      tabBtns.forEach((b) => { if (b.dataset.tab !== "record") b.classList.remove("is-active"); });
+      btn.classList.add("is-active");
+      if (tab === "dumps") {
+        const dumpsView = $("#dumpsView");
+        if (dumpsView) dumpsView.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (tab === "search") {
+        const searchInput = $("#searchInput");
+        if (searchInput) { searchInput.focus(); searchInput.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      } else if (tab === "settings") {
+        openDrawer($("#settingsDrawer"));
+      }
+    });
+  });
+}
+
 async function init() {
   bindEvents();
+  bindTabBar();
+  initOnboarding();
+  initTheme();
   try {
     const idleImg = $("#mascotImg");
     if (idleImg) idleImg.src = API.mascot("idle");

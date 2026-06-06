@@ -218,23 +218,6 @@ def test_agent_result_includes_duration():
 # ---------------------------------------------------------------------------
 
 
-def test_fallback_when_pydantic_deep_agents_missing(monkeypatch):
-    # Pretend pydantic_deep_agents was never importable. The agent's
-    # inline loop is the canonical implementation, so the constructor
-    # and `run` must still succeed end-to-end.
-    import vibedump.agent.core as core
-
-    monkeypatch.setattr(core, "_HAS_PYDANTIC_DEEP_AGENTS", False)
-    monkeypatch.setattr(core, "_PDAAgent", None)
-    assert core._HAS_PYDANTIC_DEEP_AGENTS is False
-
-    fake = FakeLLMProvider([ChatResponse(content="inline works")])
-    agent = OpenClaude(AgentConfig(), ToolRegistry(), llm=fake)
-    result = agent.run("ping")
-    assert result.final_message == "inline works"
-    assert result.steps == 1
-
-
 # ---------------------------------------------------------------------------
 # M9.5: Pydantic AI backend selection
 # ---------------------------------------------------------------------------

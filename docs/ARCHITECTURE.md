@@ -146,14 +146,17 @@ The state lives in `dumps.status` and is mirrored through
 | M5 | Mascot frames, XP, achievements | complete |
 | M6 | Storage sync (rclone + Drive) + redacted config | complete |
 | M7 | Real hardware bridges (Whisplay, PiSugar, audio) | complete |
-| M8 | Polish, doc set, soak tests | in progress |
-| M9 | OpenClaude agent runtime | planned |
+| M8 | Polish, doc set, soak tests | complete |
+| M9 | OpenClaude agent runtime | complete |
+| M9.5 | Pydantic-AI backend + tool registry | complete |
+| M10 | Self-learning (memory, swarm, skills, evolution) | in progress — see [SWARM_MASTER_ROADMAP.md](SWARM_MASTER_ROADMAP.md) |
 
 ## Where M9 (the OpenClaude agent) hooks in
 
-M9 replaces today's `AgentPipeline` with a long-lived agent that can
+M9 augments today's `AgentPipeline` with a long-lived agent that can
 call tools against the same AppState, on top of an event-sourced
-conversation state machine.
+conversation state machine. The HTTP routes and `step_listener` contract
+remain stable; see `vibedump/agent/` for the runtime wiring.
 
 The intended hook points:
 
