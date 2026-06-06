@@ -331,8 +331,8 @@ Wave 5–6:
 | 3 — Hardening | 8 | 8 | 100% |
 | 4 — M10 | 12 | 8 | 67% |
 | 5 — QA | 8 | 3 | 38% |
-| 6 — Release | 4 | 2 | 50% |
-| **Total** | **83** | **71** | **86%** |
+| 6 — Release | 4 | 4 | 100% |
+| **Total** | **83** | **73** | **88%** |
 
 **Deferred (needs Pi):** HW-GATE-01/02, HW-11, QA-06. **Deferred (future):** M10-04/09/10/12. **Shipped in v0.2.0:** (HW-GATE-01/02), P2 UI polish (UI-16–23), real bge embeddings (M10-04), Smart Dumpi (M10-09), release merge/tag.
 
