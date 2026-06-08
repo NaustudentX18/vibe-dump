@@ -1,13 +1,14 @@
 # Install
 
-## One-liner (placeholder)
+## One-liner (recommended for Raspberry Pi OS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<placeholder>/vibe-dump/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NaustudentX18/vibe-dump/main/scripts/install.sh | bash
 ```
 
-The URL above is a placeholder until the repo goes public. Use the
-manual path below in the meantime.
+This bootstraps the project, creates a venv at `./.venv`, installs
+the package with the `web` extra, and (on a Pi) installs the
+systemd unit and Whisplay HAT prereqs.
 
 ## Manual install
 
@@ -17,7 +18,7 @@ fine; we don't need a desktop).
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/<placeholder>/vibe-dump.git
+git clone https://github.com/NaustudentX18/vibe-dump.git
 cd vibe-dump
 
 # 2. Create a venv and install the package with the web extra

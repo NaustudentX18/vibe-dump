@@ -1,184 +1,243 @@
 # Vibe-Dump
 
-> **Voice dumps ➔ polished turds. AI spec compiler for Pi Zero 2 W.**
+> Voice dumps into dev-ready software blueprints. Pocket-sized, runs on a Pi Zero 2 W, polite enough for any Linux or macOS box.
 
-<div align="center">
-  <img src="docs/logo.png" alt="Vibe-Dump Logo" width="250px"/>
-  <br/>
-  <p><em>"Dumpi, the AI agent that turns your dumped AI vibe code idea slop into a polished turd!"</em></p>
-</div>
-
-<br/>
-
-[![Tests Status](https://img.shields.io/badge/Tests-517%20Passed-success?style=flat-square&logo=github&logoColor=white)](#testing)
-[![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue?style=flat-square&logo=python&logoColor=white)](pyproject.toml)
-[![Framework](https://img.shields.io/badge/FastAPI-0.118+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Agent Engine](https://img.shields.io/badge/Pydantic--AI-v1.0-FF4081?style=flat-square&logo=pydantic&logoColor=white)](https://ai.pydantic.dev)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
-
-Vibe-Dump is a pocket-sized AI spec compiler that transforms chaotic voice notes and audio ideas into structured, dev-ready **Vibe Coding Blueprints**. These blueprints are fully compatible with Cursor, Claude Code, Codex, or Gemini.
-
-The system runs locally as a single Python process on a Raspberry Pi Zero 2 W wearing a **PiSugar Whisplay HAT** (LCD, buttons, built-in MEMS mics + onboard speaker via WM8960) and a **PiSugar 3** battery. It exposes a modern, mobile-first web dashboard allowing you to drive the active-listening agent, battery telemetry, and cloud sync from your phone. Whisplay audio: [PiSugar/Whisplay](https://github.com/PiSugar/Whisplay).
+[![CI](https://github.com/NaustudentX18/vibe-dump/actions/workflows/ci.yml/badge.svg)](https://github.com/NaustudentX18/vibe-dump/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![Release v0.2.0](https://img.shields.io/badge/Release-v0.2.0-FF4081.svg)](docs/RELEASE_v0.2.0.md)
 
 ---
 
-## 📸 Interface Preview
+## What it is
 
-<div align="center">
-  <table>
-    <tr>
-      <td width="33%" align="center"><strong>Dumpi Mascot (Idle)</strong></td>
-      <td width="33%" align="center"><strong>Dumpi Listening</strong></td>
-      <td width="33%" align="center"><strong>Mobile Dashboard</strong></td>
-    </tr>
-    <tr>
-      <td><img src="docs/screenshots/dumpi-idle.png" alt="Dumpi Mascot Idle" width="100%"/></td>
-      <td><img src="docs/screenshots/dumpi-listening.png" alt="Dumpi Mascot Listening" width="100%"/></td>
-      <td><img src="docs/screenshots/dashboard-mobile.png" alt="Mobile Dashboard View" width="100%"/></td>
-    </tr>
-    <tr>
-      <td align="center"><strong>Developer Settings</strong></td>
-      <td align="center"><strong>Storage & Sync</strong></td>
-      <td align="center"><strong>Pi Hardware Build</strong></td>
-    </tr>
-    <tr>
-      <td><img src="docs/screenshots/dashboard-settings.png" alt="Settings Panel" width="100%"/></td>
-      <td><img src="docs/screenshots/storage-panel.png" alt="Storage Panel" width="100%"/></td>
-      <td><img src="docs/screenshots/dumpi-idle.png" alt="Whisplay build — Dumpi on LCD" width="100%"/></td>
-    </tr>
-  </table>
-</div>
+Vibe-Dump is a pocket-sized voice-to-blueprint compiler. Speak a rough idea into it, get a 12-section software spec back, ready to drop into Cursor, Claude Code, or any agent-friendly IDE. The mascot, Dumpi, watches the active-listener state machine animate from `idle` to `ready` while your thought becomes a plan.
+
+The canonical target is a Raspberry Pi Zero 2 W wearing a PiSugar Whisplay HAT (LCD, buttons, dual MEMS mics, onboard speaker) and a PiSugar 3 battery HAT, running a single Python process you can reach from your phone. Drop the HATs and the same code happily runs on any Linux or macOS dev box in **fake mode** — no API keys, no cloud, no hardware, just the dashboard.
 
 ---
 
-## 🔄 How a Vibe-Dump Flows
+## 30-second demo
 
-Vibe-Dump coordinates hardware recording buttons, local audio processing, state machine nodes, and cloud/local LLM providers to synthesize voice transcripts into markdown blueprints.
+> Demo GIF coming soon — record a voice-dump to blueprint flow to replace this.
 
-```
-[User Speech] ──► Mic Capture ──► STT (Cloud / Local Whisper) ──► AgentPipeline
-                                                                       │
-                                                                       ▼
-                                                             [State Node: Listening]
-                                                             [ASK] Clarifying Question?
-                                                             [FINALIZE] Capture Completed
-                                                                       │
-                                                                       ▼
-                                                             Blueprint Compiler (LLM)
-                                                                       │
-                                                                       ▼
-                                                           [Vibe Coding Blueprint]
-                                                                       │
-                                                                       ▼
-                                                             rclone ──► Google Drive
+**Try it in 30 seconds:**
+
+```bash
+git clone https://github.com/NaustudentX18/vibe-dump.git
+cd vibe-dump
+pip install -e ".[web]"
+./scripts/run_dev.sh
+# open http://localhost:8080
 ```
 
-The active-listener workflow executes state transitions:
-$$\text{Draft} \longrightarrow \text{Listening} \longrightarrow \text{Thinking} \longrightarrow \text{Listening} \mid \text{Ready}$$
+---
 
-Transitions publish events to the event bus (`dump.status`) in real-time, causing the procedural Dumpi mascot to animate dynamically on the Whisplay screen and mobile dashboard.
+## Screenshots
+
+The full screenshot set is being rebuilt for the v0.2.0 ship. For
+now, here's what we have — more will land as `docs/screenshots/` is
+re-shot against the second-wave UI.
+
+| Pi hardware build | Dumpi listening |
+| :---: | :---: |
+| ![Pi Zero 2 W with the Whisplay HAT stacked on top](docs/screenshots/assembly-1.jpg) | ![Dumpi listening mascot animating with the mic active](docs/screenshots/dumpi-listening.png) |
+
+> See `docs/screenshots/` for the raw source images, and
+> [`docs/HARDWARE.md`](docs/HARDWARE.md) for the assembly walkthrough
+> and pin map.
+
+---
+
+## How a vibe-dump flows
+
+Vibe-Dump coordinates hardware buttons, audio capture, the active-listener state machine, and a swarm of LLM nodes to turn voice transcripts into markdown blueprints.
+
+```
+[Speech] -> Mic Capture -> STT (Whisper / fake) -> AgentPipeline
+                                                -> [ASK]? Clarify : [FINALIZE] Compile
+                                                -> Blueprint Compiler
+                                                -> rclone -> Drive / S3 / B2
+```
+
+The active-listener workflow runs through a single state list:
+
+`draft` -> `listening` -> `thinking` -> `listening` | `ready`
+
+Every transition publishes a `dump.status` event to the SSE event bus, which animates the Dumpi mascot on the Whisplay screen and the mobile dashboard in lockstep.
 
 ---
 
 ## Features
 
-- **Voice capture** — Push-to-talk via Whisplay HAT MEMS mics (WM8960), web UI, or Button D. Optional USB/BT mic for upgrades.
-- **Whisper STT** — Real `faster-whisper` speech-to-text with a fake fallback for local zero-config testing.
-- **Piper TTS** — Text-to-speech readback through the Whisplay onboard speaker (or USB/BT via `aplay`).
-- **7 LLM Providers** — Supports OpenAI, OpenRouter, NVIDIA NIM, Groq, Claude, Gemini, and local Ollama.
-- **SQLite FAG / RAG** — FTS5-backed chunk store, BM25 search, chunked transcripts, and sqlite schema integration.
-- **Dumpi mascot** — Procedural PIL mascot renderer generating unique palette frames per state.
-- **XP / Achievements** — XP progress, profile level-ups, and achievements logged locally.
-- **Whisplay HAT** — SPI-driven LCD screen + buttons for physical push-to-talk.
-- **PiSugar telemetry** — Battery / voltage / current telemetry polled over I2C.
-- **rclone sync** — Automated cloud drive synchronization for blueprints, logs, and capture files.
+### Capture
+- Web mic push-to-talk in the mobile dashboard
+- USB or Bluetooth audio input as a drop-in upgrade
+- Whisplay HAT MEMS mics (WM8960) for the Pi build
+- Physical push-to-talk via the Whisplay Button D
+
+### Intelligence
+- Active-listener state machine with explicit `[ASK]` and `[FINALIZE]` turns
+- Pydantic-graph agent swarm with Architect, Critic, and Security nodes
+- 7 LLM providers: OpenAI, OpenRouter, NVIDIA NIM, Groq, Anthropic, Gemini, plus local Ollama
+- Zero-config fake mode that boots without a single API key
+- Whisper STT and Piper TTS adapters, each with a fake fallback
+
+### Storage & Sync
+- SQLite with FTS5-powered RAG over chunked transcripts
+- rclone sync to Google Drive, S3, or Backblaze B2
+- Atomic write-verify for every export and blueprint
+- Redacted provider config export for safe sharing
+
+### Experience
+- Dumpi mascot rendered as 8 procedural PIL frames per state
+- XP, levels, and achievements logged locally
+- Mobile-first dashboard with chat bubbles, dump filters, and delete sheets
+- Server-Sent Events event bus for real-time UI updates
 
 ---
 
-## Quickstart
+## Architecture
 
-### One-Line Automated Installer
-Deploy Vibe-Dump on your local machine or Raspberry Pi instantly:
-```bash
-# One-liner (canonical placeholder; replace with the real upstream URL)
-curl -fsSL https://raw.githubusercontent.com/<placeholder>/vibe-dump/main/scripts/install.sh | bash
+One Python process, one FastAPI app, one SQLite database, one in-memory agent pipeline, one bounded event bus. Hardware bridges (Whisplay, PiSugar, audio capture) are best-effort attachments that fall back to fakes on any non-Pi dev box. The system sits in five layers:
 
-# Or the live public repo:
-curl -fsSL https://raw.githubusercontent.com/NaustudentX18/vibe-dump/main/scripts/install.sh | bash
+```
+            Browser (mobile / desktop)
+                     |
+                     v
+   +---+   +-----------+   +----------------+
+   |   |   |           |   |                |
+   |   |   |  EventBus |   |  AgentPipeline |
+   |   |   |   (SSE)   |   | active-listener|
+   |   |   +-----+-----+   +--------+-------+
+   |   |         |                  |
+   |   v         v                  v
+   |  FastAPI  <-- SQLite (WAL + FTS5, serialized writes) --+
+   |   app                                              |
+   +---+------------------------------------------------+
+         |        |                 |          |
+         v        v                 v          v
+     STT/LLM/TTS  Mascot         RAG        rclone
+     registry     Renderer      memory   -> Drive / S3
 ```
 
-### Manual Installation
-If you prefer to configure the environment manually:
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/NaustudentX18/vibe-dump.git
-   cd vibe-dump
-   ```
-
-2. **Set up virtual environment:**
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   # Install the package with Web Dashboard, Dev Utilities, and Pydantic-AI agent extras
-   pip install -e ".[web,all]"
-   ```
-
-4. **Run the developer dashboard:**
-   ```bash
-   ./scripts/run_dev.sh
-   ```
-   The dashboard runs at `http://0.0.0.0:8080`.
+Full deep-dive, including the module map and the data-flow diagram, lives in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
 ## Hardware BOM
 
-For full physical details, refer to [docs/HARDWARE.md](docs/HARDWARE.md).
+Full physical details, pin map, and I2C addresses in [`docs/HARDWARE.md`](docs/HARDWARE.md).
 
 | Qty | Component | Role | Specs & Notes |
 | :---: | :--- | :--- | :--- |
-| **1** | **Raspberry Pi Zero 2 W** | Compute Engine | 512 MB RAM. Headless configuration. |
-| **1** | **PiSugar Whisplay HAT** | UI + Audio | 240×280 LCD, 4 buttons, WS2812 LED, **WM8960 dual MEMS mics + onboard speaker**. [Driver repo](https://github.com/PiSugar/Whisplay) |
-| **1** | **PiSugar 3 Battery HAT** | Power & Telemetry | I2C status readings, UPS mode, 5V boost. |
-| **0** | *(optional)* **USB / BT speaker** | Louder TTS | 3.5 mm jack or USB/BT if you want richer audio than the onboard speaker. |
+| **1** | Raspberry Pi Zero 2 W | Compute Engine | 512 MB RAM, headless. |
+| **1** | PiSugar Whisplay HAT | UI + Audio | 240x280 LCD, 4 buttons, WS2812 LED, WM8960 dual MEMS mics + onboard speaker. |
+| **1** | PiSugar 3 Battery HAT | Power & Telemetry | I2C battery / voltage / current readings, UPS mode. |
+| **0** | USB / BT speaker (optional) | Louder TTS | 3.5 mm jack or USB/BT if the onboard speaker is not loud enough. |
 
 ---
 
-## ⚙️ Configuration Reference
+## Quickstart
 
-Copy `.env.example` to `.env` and specify the API keys and configurations you need. All integrations degrade to mocks if variables are omitted.
+### Manual install
 
-| Environment Variable | Default Value | Description |
+Requires Python 3.11+. The web extra pulls in FastAPI and Uvicorn; that's all you need to run the dashboard.
+
+```bash
+# 1. Clone
+git clone https://github.com/NaustudentX18/vibe-dump.git
+cd vibe-dump
+
+# 2. Set up a venv
+python -m venv .venv
+source .venv/bin/activate
+
+# 3. Install with the web dashboard
+pip install -e ".[web]"
+
+# 4. Run
+./scripts/run_dev.sh
+# dashboard: http://localhost:8080
+```
+
+**Zero-config dev:** `pip install -e ".[web]"` works against the fake provider set with no API keys needed. Boot it, hit the dashboard, watch Dumpi cycle through states on canned transcripts.
+
+### Real providers
+
+To swap the fakes for real STT, LLM, and TTS, copy the example env and add at least one key:
+
+```bash
+cp .env.example .env
+# edit .env -- set OPENAI_API_KEY (or whichever provider you want)
+# set VIBEDUMP_REGISTRY=real
+./scripts/run_dev.sh
+```
+
+Any provider with a key present is registered; any with a missing key is silently omitted and surfaced on the dashboard's provider health list. Add `VIBEDUMP_AGENT=openlaude` to flip on the Pydantic-AI swarm runtime (M9.5). The systemd unit and Whisplay HAT prereqs are Pi-only extras; see [`docs/INSTALL.md`](docs/INSTALL.md) for the full hardware path.
+
+---
+
+## Configuration
+
+All integrations degrade to fakes if the relevant variable is omitted. Copy `.env.example` to `.env` and edit locally; do not commit it.
+
+| Environment Variable | Default | Description |
 | :--- | :--- | :--- |
-| `VIBEDUMP_REGISTRY` | `fake` | Registry mode. Set to `real` for cloud LLM/STT backends. |
-| `VIBEDUMP_STT_PROVIDER` | `fake` | Speech-to-Text provider. Options: `fake` or `whisper`. |
-| `VIBEDUMP_LLM_PROVIDER` | `fake` | Active listener provider. Options: `openai`, `groq`, `claude`, `gemini`, `local_pc`. |
-| `VIBEDUMP_TTS_PROVIDER` | `fake` | Text-to-Speech readback. Options: `fake` or `piper`. |
-| `VIBEDUMP_PC_BASE_URL` | `http://desktop-ujsii52.local:11434` | Ollama URL endpoint on your companion PC. |
+| `VIBEDUMP_REGISTRY` | `fake` | Provider mode. `real` enables cloud LLM / STT / TTS backends. |
+| `VIBEDUMP_STT_PROVIDER` | `fake` | Speech-to-text backend. `fake` or `whisper`. |
+| `VIBEDUMP_LLM_PROVIDER` | `fake` | Active-listener backend. `openai`, `groq`, `claude`, `gemini`, `local_pc`, more. |
+| `VIBEDUMP_TTS_PROVIDER` | `fake` | Text-to-speech readback. `fake` or `piper`. |
+| `VIBEDUMP_AGENT` | `inline` | Agent runtime. `inline` (always-on) or `openlaude` (Pydantic-AI swarm). |
+| `VIBEDUMP_PC_BASE_URL` | `http://desktop-ujsii52.local:11434` | Ollama endpoint on the companion desktop PC. |
 | `VIBEDUMP_PC_MODEL` | `qwen3-14b-agent` | Companion Ollama model used. |
-| `VIBEDUMP_RCLONE_REMOTE` | `gdrive:` | Target destination for cloud drive backup uploads. |
-| `VIBEDUMP_ALSA_CAPTURE_DEVICE` | *(auto)* | ALSA device for `arecord` (Whisplay WM8960 after driver install). |
+| `VIBEDUMP_RCLONE_REMOTE` | `gdrive:` | rclone target for cloud drive backup uploads. |
+| `VIBEDUMP_ALSA_CAPTURE_DEVICE` | *(auto)* | ALSA device for `arecord` (Whisplay WM8960). |
 | `VIBEDUMP_ALSA_PLAYBACK_DEVICE` | *(auto)* | ALSA device for `aplay` TTS playback. |
 
+Provider-specific notes live in [`docs/PROVIDERS.md`](docs/PROVIDERS.md).
+
 ---
 
-## 🧪 Testing
+## Testing & CI
 
-The codebase maintains full coverage across the state machine, SQLite database layers, tool registry, and EventBus.
-
-Run tests using the virtual environment interpreter:
 ```bash
-source .venv/bin/activate
-python -m pytest
+# Run the full suite (517 tests as of v0.2.0)
+python -m pytest -q
+
+# Lint
+ruff check vibedump tests
 ```
+
+GitHub Actions runs both on every push to `main` — see [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The CI badge at the top of this README is the live status.
+
+---
+
+## Roadmap
+
+Shipped in **v0.2.0**: Whisplay WM8960 audio path, dashboard split into static assets, markdown blueprints, push-to-talk UX, M10 memory store and swarm DAG scaffolding, light theme, chat bubbles, achievement overlay, 517 tests with GitHub Actions CI. See [`docs/RELEASE_v0.2.0.md`](docs/RELEASE_v0.2.0.md) for the full milestone log.
+
+Next: real-time audio via Pipecat / WebRTC, Model Context Protocol host, the multi-agent Vibe Swarm (Architect + Critic + Security), and IDE companion endpoints for Cursor and Claude Code. Full picture in [`docs/V2_ROADMAP.md`](docs/V2_ROADMAP.md).
+
+---
+
+## Contributing
+
+Issues, PRs, and Dumpi-themed bug reports welcome. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow, the issue templates for bug and feature reports, the pull request template, and [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) for the ground rules.
+
+---
+
+## Acknowledgements
+
+- **PiSugar** for the Whisplay HAT and PiSugar 3 battery board that make the pocket build real
+- **Pydantic-AI** for the graph-backed agent runtime that powers the swarm
+- **FastAPI** for the HTTP, SSE, and WebSocket plumbing underneath the dashboard
+- **Contributor Covenant** for the code of conduct template
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+MIT — see [`LICENSE`](LICENSE).
+
+<sub>Dumpi says: speak the vibe, ship the spec.</sub>

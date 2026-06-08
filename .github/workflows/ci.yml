@@ -2,21 +2,51 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
+    name: test
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
       - name: Install dependencies
-        run: pip install -e ".[web,all]" pillow ruff
-      - name: Pytest
-        run: python -m pytest -q
-      - name: Ruff (auto-fixable subset)
-        run: python -m ruff check vibedump tests --fix --exit-zero
+        run: pip install -e ".[web,all,agent]"
+
+      - name: Pytest with coverage
+        run: python -m pytest -q --cov=vibedump --cov-report=xml --cov-fail-under=70
+
+      - name: Ruff lint
+        run: python -m ruff check vibedump tests
+
+      - name: Ruff format check
+        run: python -m ruff format --check vibedump tests
+
+      - name: Upload coverage to Codecov
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

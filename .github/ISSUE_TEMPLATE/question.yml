@@ -1,0 +1,35 @@
+name: "❓ Question"
+description: "Need help or clarification."
+title: "[question] "
+labels: ["question"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: "What are you trying to do?"
+      description: "Describe your goal so we can help accurately."
+      placeholder: "I want to use vibedump with my local Ollama instance on my PC, but the docs only mention OpenAI and OpenRouter. Is this supported?"
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: "What have you tried?"
+      description: "Commands run, docs read, config changes attempted."
+      placeholder: |
+        - Set `provider: "ollama"` in config.json
+        - Pointed `base_url` at `http://desktop.local:11434`
+        - Got `unsupported provider: ollama` error
+  - type: dropdown
+    id: category
+    attributes:
+      label: "Category"
+      description: "Pick the closest fit so the right people see this."
+      options:
+        - "Setup"
+        - "Provider config"
+        - "Hardware"
+        - "API"
+        - "Other"
+    validations:
+      required: true
