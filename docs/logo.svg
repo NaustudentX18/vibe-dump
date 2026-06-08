@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="vibe-dump mark">
+  <title>vibe-dump</title>
+  <desc>A speech bubble with three structured content lines and a sound-wave accent at the upper right, on a deep navy tile.</desc>
+
+  <!-- Deep navy-charcoal background tile (rounded square) -->
+  <rect x="0" y="0" width="64" height="64" rx="10" ry="10" fill="#0F1419"/>
+
+  <!-- Speech bubble body (rounded rectangle, periwinkle blue) -->
+  <rect x="8" y="14" width="42" height="32" rx="7" ry="7" fill="#5B7CFA"/>
+
+  <!-- Speech bubble tail (pointing down-left) -->
+  <path d="M 16 44 L 12 53 L 24 44 Z" fill="#5B7CFA"/>
+
+  <!-- 3 content lines inside the bubble (representing the structured 12-section blueprint) -->
+  <line x1="15" y1="22" x2="43" y2="22" stroke="#0F1419" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="15" y1="30" x2="37" y2="30" stroke="#0F1419" stroke-width="2.6" stroke-linecap="round"/>
+  <line x1="15" y1="38" x2="41" y2="38" stroke="#0F1419" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- Sound waves emerging from the upper right of the bubble (the "vibe" / voice input) -->
+  <path d="M 52 14 Q 57 19 52 24" stroke="#FCD34D" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+  <path d="M 56 10 Q 63 19 56 28" stroke="#FCD34D" stroke-width="2.2" fill="none" stroke-linecap="round" opacity="0.65"/>
+  <path d="M 60 6 Q 69 19 60 32" stroke="#FCD34D" stroke-width="2.2" fill="none" stroke-linecap="round" opacity="0.3"/>
+</svg>
