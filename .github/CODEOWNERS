@@ -1,0 +1,8 @@
+# Default owners for everything
+*       @NaustudentX18
+
+# Critical paths get a second review
+/vibedump/providers/    @NaustudentX18
+/vibedump/agent/        @NaustudentX18
+/docs/                  @NaustudentX18
+/.github/workflows/     @NaustudentX18

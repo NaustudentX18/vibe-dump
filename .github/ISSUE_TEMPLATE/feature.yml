@@ -1,0 +1,34 @@
+name: "✨ Feature Request"
+description: "Suggest a new capability."
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem"
+      description: "What pain does this solve? Why is it needed?"
+      placeholder: "Currently I have to manually copy dumps off the Pi over SCP after every session. I'd love vibedump to auto-upload to a folder so I can review on my laptop."
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: "Proposed solution"
+      description: "What should happen? Describe the ideal behavior."
+      placeholder: "Add a `vibedump upload` subcommand that takes a destination (S3, WebDAV, or a folder path) and pushes new dumps automatically. A new `upload` section in `config.json` would hold credentials and the destination URL."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives considered"
+      description: "What other approaches did you think about, and why prefer the proposed one?"
+      placeholder: "I considered rsync over SSH, but that requires server-side setup. An S3 uploader is zero-config on the host side."
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: "Contribution"
+      options:
+        - label: "I am willing to submit a PR for this feature"
+        - label: "I have discussed this in Discussions (link: …)"
